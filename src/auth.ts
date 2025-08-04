@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth";
+import { jwt, bearer } from "better-auth/plugins";
 import { Pool } from "pg";
 
 const user = process.env.SQL_DB_USERNAME;
@@ -8,6 +9,7 @@ const port = process.env.SQL_DB_PORT;
 const database = process.env.SQL_DB_NAME;
 
 export const auth = betterAuth({
+  trustedOrigins: ["http://localhost:3000"],
   database: new Pool({
     connectionString: `postgres://${user}:${password}@${host}:${port}/${database}`,
   }),
@@ -17,4 +19,5 @@ export const auth = betterAuth({
       clientSecret: process.env.DISCORD_CLIENT_SECRET as string,
     },
   },
+  plugins: [jwt(), bearer()],
 });

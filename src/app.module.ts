@@ -11,7 +11,7 @@ import appConfig from "@/config/app.config";
 import sqlConfig from "@/config/sql.config";
 import redisConfig from "@/config/redis.config";
 import { LoggerModule } from "nestjs-pino";
-import { UserModule } from "@/modules/user/user.module";
+import { ProfileModule } from "@/modules/profiles/profile.module";
 import { SocketModule } from "@/modules/socket/socket.module";
 import helmet from "helmet";
 import { AllExceptionFilter } from "@/filters/all-exception.filter";
@@ -91,7 +91,7 @@ import { AuthModule } from "@thallesp/nestjs-better-auth";
       inject: [ConfigService],
     }),
     AuthModule.forRoot(auth),
-    UserModule,
+    ProfileModule,
     SocketModule,
   ],
   providers: [
