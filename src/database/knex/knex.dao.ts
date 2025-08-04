@@ -1,7 +1,7 @@
-import { Knex } from 'knex';
-import { InjectConnection } from 'nest-knexjs';
-import { BaseTransaction } from '@/database/base.transaction';
-import { Injectable } from '@nestjs/common';
+import { Knex } from "knex";
+import { InjectConnection } from "nest-knexjs";
+import { BaseTransaction } from "@/database/base.transaction";
+import { Injectable } from "@nestjs/common";
 
 @Injectable()
 export abstract class KnexDao<T extends KnexDao<T>> {

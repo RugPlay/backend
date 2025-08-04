@@ -1,10 +1,10 @@
-import { Injectable } from '@nestjs/common';
-import { KnexDao } from '@/database/knex/knex.dao';
-import { UserDto } from '../dtos/user.dto';
+import { Injectable } from "@nestjs/common";
+import { KnexDao } from "@/database/knex/knex.dao";
+import { UserDto } from "../dtos/user.dto";
 
 @Injectable()
 export class UserDao extends KnexDao<UserDao> {
-  protected tableName = 'users';
+  protected tableName = "users";
 
   async create(data: Partial<UserDto>): Promise<UserDto> {
     const [user] = await this.knex(this.tableName)
@@ -13,7 +13,7 @@ export class UserDao extends KnexDao<UserDao> {
         created_at: new Date(),
         updated_at: new Date(),
       })
-      .returning('*');
+      .returning("*");
     return user;
   }
 
@@ -36,7 +36,7 @@ export class UserDao extends KnexDao<UserDao> {
         ...data,
         updated_at: new Date(),
       })
-      .returning('*');
+      .returning("*");
     return user || null;
   }
 

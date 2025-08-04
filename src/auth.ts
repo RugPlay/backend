@@ -1,7 +1,7 @@
-import { betterAuth } from 'better-auth';
-import { Pool } from 'pg';
+import { betterAuth } from "better-auth";
+import { Pool } from "pg";
 
-const user = process.env.SQL_DB_USER;
+const user = process.env.SQL_DB_USERNAME;
 const password = process.env.SQL_DB_PASSWORD;
 const host = process.env.SQL_DB_HOST;
 const port = process.env.SQL_DB_PORT;

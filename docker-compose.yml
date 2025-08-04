@@ -8,6 +8,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
+      POSTGRES_DB: timescaledb
     volumes:
       - ./.docker-compose/data/timescaledb:/var/lib/postgresql/data
     networks:

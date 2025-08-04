@@ -5,10 +5,10 @@ import {
   Injectable,
   Inject,
   Logger,
-} from '@nestjs/common';
-import { Response } from 'express';
-import { ConfigService } from '@nestjs/config';
-import { BaseExceptionFilter } from '@nestjs/core';
+} from "@nestjs/common";
+import { Response } from "express";
+import { ConfigService } from "@nestjs/config";
+import { BaseExceptionFilter } from "@nestjs/core";
 // import { InjectSentry, SentryService } from '@ntegral/nestjs-sentry';
 
 @Injectable()
@@ -43,7 +43,7 @@ export class AllExceptionFilter extends BaseExceptionFilter {
         stackTrace: undefined,
       };
 
-      if (this.config.get<boolean>('app.debug')) {
+      if (this.config.get<boolean>("app.debug")) {
         payload.stackTrace = exception.stack;
       }
 

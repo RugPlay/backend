@@ -2,13 +2,13 @@ import {
   WebSocketGateway,
   OnGatewayConnection,
   WebSocketServer,
-} from '@nestjs/websockets';
-import { Server } from 'socket.io';
-import { AuthenticatedSocket } from '@/modules/socket/types/authenticated-socket.interface';
-import { Optional, Session, UserSession } from '@thallesp/nestjs-better-auth';
+} from "@nestjs/websockets";
+import { Server } from "socket.io";
+import { AuthenticatedSocket } from "@/modules/socket/types/authenticated-socket.interface";
+import { Optional, Session, UserSession } from "@thallesp/nestjs-better-auth";
 
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: { origin: "*" },
 })
 export class SocketGateway implements OnGatewayConnection {
   @WebSocketServer()
@@ -22,6 +22,6 @@ export class SocketGateway implements OnGatewayConnection {
     @Session() session: UserSession,
   ) {
     client.session = session;
-    client.emit('session.info', session);
+    client.emit("session.info", session);
   }
 }
