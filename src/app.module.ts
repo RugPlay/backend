@@ -28,13 +28,21 @@ import Redis from "ioredis";
 import { REDIS_CLIENT } from "@/redis/constants/redis.constants";
 import { auth } from "./auth";
 import { AuthModule } from "@thallesp/nestjs-better-auth";
+import frontendConfig from "@/config/frontend.config";
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       cache: true,
       isGlobal: true,
-      load: [appConfig, cookieConfig, sqlConfig, redisConfig, authConfig],
+      load: [
+        appConfig,
+        cookieConfig,
+        sqlConfig,
+        redisConfig,
+        authConfig,
+        frontendConfig,
+      ],
     }),
     LoggerModule.forRoot(),
     EventEmitterModule.forRoot(),
