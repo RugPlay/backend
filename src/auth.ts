@@ -9,7 +9,12 @@ const port = process.env.SQL_DB_PORT;
 const database = process.env.SQL_DB_NAME;
 
 export const auth = betterAuth({
-  trustedOrigins: ["http://localhost:3000"],
+  baseURL: process.env.APP_URL,
+  trustedOrigins: [process.env.FRONTEND_URL],
+  crossSubDomainCookies: {
+    enabled: true,
+    domain: process.env.COOKIE_DOMAIN,
+  },
   database: new Pool({
     connectionString: `postgres://${user}:${password}@${host}:${port}/${database}`,
   }),

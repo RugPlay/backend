@@ -11,7 +11,7 @@ import { REDIS_CLIENT } from "./redis/constants/redis.constants";
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     cors: {
-      origin: true, // or your frontend URL
+      origin: true,
       credentials: true,
     },
     bodyParser: false,
