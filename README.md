@@ -1,6 +1,6 @@
 ## Description
 
-This is an enterprise grade starter template for building robust, scalable, and maintainable NestJS applications. It provides a solid foundation with best practices, security features, and production-ready configurations out of the box. The authentication system implements a secure JWT-based approach using JWKS (JSON Web Key Set) from your identity provider, while also supporting API key management for service-to-service communication.
+This is an startup grade starter template for building robust, scalable, and maintainable NestJS applications. It provides a solid foundation with best practices, security features, and production-ready configurations out of the box. The authentication system implements BetterAuth.
 
 ## Table of Contents
 - [Description](#description)
