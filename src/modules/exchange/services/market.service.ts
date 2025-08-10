@@ -57,7 +57,7 @@ export class MarketService {
       }
 
       this.logger.log(`Created market: ${market.symbol} (${market.name})`);
-      return this.mapMarketRecordToMarket(createdMarket);
+      return createdMarket;
     } catch (error) {
       this.logger.error("Error creating market:", error);
       return null;
@@ -69,12 +69,7 @@ export class MarketService {
    */
   async getMarketById(id: string): Promise<MarketDto | null> {
     try {
-      const marketRecord = await this.marketDao.getMarketById(id);
-      if (!marketRecord) {
-        return null;
-      }
-
-      return this.mapMarketRecordToMarket(marketRecord);
+      return await this.marketDao.getMarketById(id);
     } catch (error) {
       this.logger.error(`Error fetching market by ID ${id}:`, error);
       return null;
@@ -86,12 +81,7 @@ export class MarketService {
    */
   async getMarketBySymbol(symbol: string): Promise<MarketDto | null> {
     try {
-      const marketRecord = await this.marketDao.getMarketBySymbol(symbol);
-      if (!marketRecord) {
-        return null;
-      }
-
-      return this.mapMarketRecordToMarket(marketRecord);
+      return await this.marketDao.getMarketBySymbol(symbol);
     } catch (error) {
       this.logger.error(`Error fetching market by symbol ${symbol}:`, error);
       return null;
@@ -103,10 +93,7 @@ export class MarketService {
    */
   async getMarkets(filters?: MarketFiltersDto): Promise<MarketDto[]> {
     try {
-      const marketRecords = await this.marketDao.getMarkets(filters);
-      return marketRecords.map((record) =>
-        this.mapMarketRecordToMarket(record),
-      );
+      return await this.marketDao.getMarkets(filters);
     } catch (error) {
       this.logger.error("Error fetching markets:", error);
       return [];
@@ -118,10 +105,7 @@ export class MarketService {
    */
   async getMarketsByCategory(category: MarketCategory): Promise<MarketDto[]> {
     try {
-      const marketRecords = await this.marketDao.getMarketsByCategory(category);
-      return marketRecords.map((record) =>
-        this.mapMarketRecordToMarket(record),
-      );
+      return await this.marketDao.getMarketsByCategory(category);
     } catch (error) {
       this.logger.error(
         `Error fetching markets by category ${category}:`,
@@ -136,10 +120,7 @@ export class MarketService {
    */
   async getActiveMarkets(): Promise<MarketDto[]> {
     try {
-      const marketRecords = await this.marketDao.getActiveMarkets();
-      return marketRecords.map((record) =>
-        this.mapMarketRecordToMarket(record),
-      );
+      return await this.marketDao.getActiveMarkets();
     } catch (error) {
       this.logger.error("Error fetching active markets:", error);
       return [];
@@ -198,7 +179,7 @@ export class MarketService {
       }
 
       this.logger.log(`Updated market: ${updatedMarket.symbol}`);
-      return this.mapMarketRecordToMarket(updatedMarket);
+      return updatedMarket;
     } catch (error) {
       this.logger.error(`Error updating market ${id}:`, error);
       return null;
@@ -256,31 +237,5 @@ export class MarketService {
     return timeRegex.test(start) && timeRegex.test(end);
   }
 
-  /**
-   * Map database record to Market interface
-   */
-  private mapMarketRecordToMarket(record: any): MarketDto {
-    return {
-      id: record.id,
-      symbol: record.symbol,
-      name: record.name,
-      category: record.category as MarketCategory,
-      subcategory: record.subcategory || undefined,
-      baseCurrency: record.base_currency,
-      quoteCurrency: record.quote_currency,
-      minPriceIncrement: parseFloat(record.min_price_increment),
-      minQuantityIncrement: parseFloat(record.min_quantity_increment),
-      maxQuantity: record.max_quantity
-        ? parseFloat(record.max_quantity)
-        : undefined,
-      isActive: record.is_active,
-      is24h: record.is_24h,
-      tradingStart: record.trading_start || undefined,
-      tradingEnd: record.trading_end || undefined,
-      timezone: record.timezone,
-      metadata: record.metadata || undefined,
-      createdAt: record.created_at,
-      updatedAt: record.updated_at,
-    };
-  }
+
 }

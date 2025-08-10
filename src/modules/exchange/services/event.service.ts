@@ -2,8 +2,8 @@ import { Injectable, Logger } from "@nestjs/common";
 import { OrderMatchEvent } from "../events/order/order-match.event";
 import { OrderFillEvent } from "../events/order/order-fill.event";
 import { TradeExecutionEvent } from "../events/trade/trade-execution.event";
-import { MatchResultDto } from "../dtos/order-matching/match-result.dto";
 import { TradeExecutionDto } from "../dtos/trade/trade-execution.dto";
+import { MatchResultDto } from "../dtos/order/match-result.dto";
 
 type SimulatorEvent = OrderMatchEvent | OrderFillEvent | TradeExecutionEvent;
 

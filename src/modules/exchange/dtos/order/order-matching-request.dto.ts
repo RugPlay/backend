@@ -17,6 +17,7 @@ export class OrderMatchingRequestDto {
       quantity: 1.5,
       orderId: "ord_123e4567-e89b-12d3-a456-426614174000",
       side: "bid",
+      portfolioId: "port_123e4567-e89b-12d3-a456-426614174000",
     },
   })
   incomingOrder: IncomingOrderDto;
@@ -54,4 +55,10 @@ export class IncomingOrderDto {
     example: "bid",
   })
   side: "bid" | "ask";
+
+  @ApiProperty({
+    description: "The portfolio ID that owns this order",
+    example: "port_123e4567-e89b-12d3-a456-426614174000",
+  })
+  portfolioId: string;
 }

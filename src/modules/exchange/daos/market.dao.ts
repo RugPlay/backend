@@ -3,26 +3,8 @@ import { KnexDao } from "@/database/knex/knex.dao";
 import { CreateMarketDto } from "../dtos/market/create-market.dto";
 import { UpdateMarketDto } from "../dtos/market/update-market.dto";
 import { MarketFiltersDto } from "../dtos/market/market-filters.dto";
-
-export interface MarketRecord {
-  id: string;
-  symbol: string;
-  name: string;
-  category: string;
-  base_currency: string;
-  quote_currency: string;
-  min_price_increment: string; // Decimal as string from database
-  min_quantity_increment: string; // Decimal as string from database
-  max_quantity: string | null; // Decimal as string from database
-  is_active: boolean;
-  is_24h: boolean;
-  trading_start: string | null; // Time string
-  trading_end: string | null; // Time string
-  timezone: string;
-  metadata: Record<string, any> | null;
-  created_at: Date;
-  updated_at: Date;
-}
+import { MarketDto } from "../dtos/market/market.dto";
+import type { MarketCategory } from "../types/market-category";
 
 @Injectable()
 export class MarketDao extends KnexDao<MarketDao> {
@@ -64,10 +46,10 @@ export class MarketDao extends KnexDao<MarketDao> {
   /**
    * Get a market by ID
    */
-  async getMarketById(id: string): Promise<MarketRecord | null> {
+  async getMarketById(id: string): Promise<MarketDto | null> {
     try {
       const [result] = await this.knex(this.tableName).where("id", id);
-      return result || null;
+      return result ? this.mapRecordToDto(result) : null;
     } catch (error) {
       console.error("Error fetching market by ID:", error);
       return null;
@@ -77,10 +59,10 @@ export class MarketDao extends KnexDao<MarketDao> {
   /**
    * Get a market by symbol
    */
-  async getMarketBySymbol(symbol: string): Promise<MarketRecord | null> {
+  async getMarketBySymbol(symbol: string): Promise<MarketDto | null> {
     try {
       const [result] = await this.knex(this.tableName).where("symbol", symbol);
-      return result || null;
+      return result ? this.mapRecordToDto(result) : null;
     } catch (error) {
       console.error("Error fetching market by symbol:", error);
       return null;
@@ -90,7 +72,7 @@ export class MarketDao extends KnexDao<MarketDao> {
   /**
    * Get all markets with optional filters
    */
-  async getMarkets(filters?: MarketFiltersDto): Promise<MarketRecord[]> {
+  async getMarkets(filters?: MarketFiltersDto): Promise<MarketDto[]> {
     try {
       let query = this.knex(this.tableName);
 
@@ -114,7 +96,8 @@ export class MarketDao extends KnexDao<MarketDao> {
         query = query.where("is_24h", filters.is24h);
       }
 
-      return await query.orderBy("symbol", "asc");
+      const results = await query.orderBy("symbol", "asc");
+      return results.map((record) => this.mapRecordToDto(record));
     } catch (error) {
       console.error("Error fetching markets:", error);
       return [];
@@ -124,11 +107,12 @@ export class MarketDao extends KnexDao<MarketDao> {
   /**
    * Get markets by category
    */
-  async getMarketsByCategory(category: string): Promise<MarketRecord[]> {
+  async getMarketsByCategory(category: string): Promise<MarketDto[]> {
     try {
-      return await this.knex(this.tableName)
+      const results = await this.knex(this.tableName)
         .where("category", category)
         .orderBy("symbol", "asc");
+      return results.map((record) => this.mapRecordToDto(record));
     } catch (error) {
       console.error("Error fetching markets by category:", error);
       return [];
@@ -138,11 +122,12 @@ export class MarketDao extends KnexDao<MarketDao> {
   /**
    * Get all active markets
    */
-  async getActiveMarkets(): Promise<MarketRecord[]> {
+  async getActiveMarkets(): Promise<MarketDto[]> {
     try {
-      return await this.knex(this.tableName)
+      const results = await this.knex(this.tableName)
         .where("is_active", true)
         .orderBy("symbol", "asc");
+      return results.map((record) => this.mapRecordToDto(record));
     } catch (error) {
       console.error("Error fetching active markets:", error);
       return [];
@@ -220,5 +205,32 @@ export class MarketDao extends KnexDao<MarketDao> {
       console.error("Error fetching categories:", error);
       return [];
     }
+  }
+
+  /**
+   * Map database record to MarketDto
+   */
+  private mapRecordToDto(record: any): MarketDto {
+    const dto = new MarketDto();
+    dto.id = record.id;
+    dto.symbol = record.symbol;
+    dto.name = record.name;
+    dto.category = record.category as MarketCategory;
+    dto.baseCurrency = record.base_currency;
+    dto.quoteCurrency = record.quote_currency;
+    dto.minPriceIncrement = parseFloat(record.min_price_increment);
+    dto.minQuantityIncrement = parseFloat(record.min_quantity_increment);
+    dto.maxQuantity = record.max_quantity
+      ? parseFloat(record.max_quantity)
+      : undefined;
+    dto.isActive = record.is_active;
+    dto.is24h = record.is_24h;
+    dto.tradingStart = record.trading_start || undefined;
+    dto.tradingEnd = record.trading_end || undefined;
+    dto.timezone = record.timezone;
+    dto.metadata = record.metadata || undefined;
+    dto.createdAt = record.created_at;
+    dto.updatedAt = record.updated_at;
+    return dto;
   }
 }

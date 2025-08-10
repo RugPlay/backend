@@ -7,12 +7,12 @@ import {
 } from "@nestjs/common";
 import { ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { OrderService } from "../services/order.service";
-import { OrderBookDto } from "../dtos/order-book/order-book.dto";
-import { OrderBookEntryDto } from "../dtos/order-book/order-book-entry.dto";
+import { OrderBookDto } from "../dtos/order/order-book.dto";
+import { OrderBookEntryDto } from "../dtos/order/order-book-entry.dto";
 
-@ApiTags("Order Book")
-@Controller("order-book")
-export class OrderBookController {
+@ApiTags("Order")
+@Controller("order")
+export class OrderController {
   constructor(private readonly orderService: OrderService) {}
 
   @Get("markets")
@@ -149,7 +149,7 @@ export class OrderBookController {
     @Param("marketId") marketId: string,
     @Param("levels") levels: string,
   ): Promise<{ bids: OrderBookEntryDto[]; asks: OrderBookEntryDto[] }> {
-    const depth = await this.orderBookService.getDepth(
+    const depth = await this.orderService.getDepth(
       marketId,
       parseInt(levels, 10),
     );

@@ -38,4 +38,10 @@ export class OrderBookEntryDto {
     example: "bid",
   })
   side: "bid" | "ask";
+
+  @ApiProperty({
+    description: "The portfolio ID that owns this order",
+    example: "port_123e4567-e89b-12d3-a456-426614174000",
+  })
+  portfolioId: string;
 }

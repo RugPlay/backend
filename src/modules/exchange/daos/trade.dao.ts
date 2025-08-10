@@ -1,21 +1,9 @@
 import { Injectable } from "@nestjs/common";
 import { KnexDao } from "@/database/knex/knex.dao";
 import { TradeExecutionDto } from "../dtos/trade/trade-execution.dto";
-
-export interface TradeRecord {
-  id: string;
-  trade_id: string;
-  market_id: string;
-  taker_order_id: string;
-  maker_order_id: string;
-  taker_side: "bid" | "ask";
-  quantity: string; // Decimal as string from database
-  price: string; // Decimal as string from database
-  taker_user_id?: string;
-  maker_user_id?: string;
-  created_at: Date;
-  updated_at: Date;
-}
+import { TradeDto } from "../dtos/trade/trade.dto";
+import { BatchCreateTradeDto, BatchTradeOperationResultDto } from "../dtos/trade/batch-create-trade.dto";
+import { v4 as uuidv4 } from "uuid";
 
 @Injectable()
 export class TradeDao extends KnexDao<TradeDao> {
@@ -50,11 +38,12 @@ export class TradeDao extends KnexDao<TradeDao> {
   /**
    * Get all trades for a specific market
    */
-  async getTradesByMarket(marketId: string): Promise<TradeRecord[]> {
+  async getTradesByMarket(marketId: string): Promise<TradeDto[]> {
     try {
-      return await this.knex(this.tableName)
+      const results = await this.knex(this.tableName)
         .where("market_id", marketId)
         .orderBy("created_at", "desc");
+      return results.map((record) => this.mapRecordToDto(record));
     } catch (error) {
       console.error("Error fetching trades by market:", error);
       return [];
@@ -68,13 +57,14 @@ export class TradeDao extends KnexDao<TradeDao> {
     marketId: string,
     limit: number = 50,
     offset: number = 0,
-  ): Promise<TradeRecord[]> {
+  ): Promise<TradeDto[]> {
     try {
-      return await this.knex(this.tableName)
+      const results = await this.knex(this.tableName)
         .where("market_id", marketId)
         .orderBy("created_at", "desc")
         .limit(limit)
         .offset(offset);
+      return results.map((record) => this.mapRecordToDto(record));
     } catch (error) {
       console.error("Error fetching recent trades:", error);
       return [];
@@ -88,12 +78,13 @@ export class TradeDao extends KnexDao<TradeDao> {
     marketId: string,
     startTime: Date,
     endTime: Date,
-  ): Promise<TradeRecord[]> {
+  ): Promise<TradeDto[]> {
     try {
-      return await this.knex(this.tableName)
+      const results = await this.knex(this.tableName)
         .where("market_id", marketId)
         .whereBetween("created_at", [startTime, endTime])
         .orderBy("created_at", "desc");
+      return results.map((record) => this.mapRecordToDto(record));
     } catch (error) {
       console.error("Error fetching trades by time range:", error);
       return [];
@@ -130,5 +121,96 @@ export class TradeDao extends KnexDao<TradeDao> {
       console.error("Error deleting old trades:", error);
       return 0;
     }
+  }
+
+  /**
+   * Batch create multiple trades efficiently
+   */
+  async batchCreateTrades(
+    trades: BatchCreateTradeDto[],
+  ): Promise<BatchTradeOperationResultDto> {
+    if (trades.length === 0) {
+      return {
+        tradesCreated: 0,
+        createdTradeIds: [],
+      };
+    }
+
+    try {
+      // Convert BatchCreateTradeDto to database format
+      const tradeRecords = trades.map((trade) => ({
+        trade_id: trade.tradeId,
+        market_id: trade.marketId,
+        taker_order_id: trade.takerOrderId,
+        maker_order_id: trade.makerOrderId,
+        taker_side: trade.takerSide,
+        quantity: trade.quantity.toString(),
+        price: trade.price.toString(),
+        created_at: trade.timestamp,
+      }));
+
+      // Perform batch insert
+      const results = await this.knex(this.tableName)
+        .insert(tradeRecords)
+        .returning("trade_id");
+
+      const createdTradeIds = results?.map((r) => r.trade_id) || 
+                             trades.map((t) => t.tradeId);
+
+      return {
+        tradesCreated: tradeRecords.length,
+        createdTradeIds,
+      };
+    } catch (error) {
+      console.error("Error in batch create trades:", error);
+      return {
+        tradesCreated: 0,
+        createdTradeIds: [],
+      };
+    }
+  }
+
+  /**
+   * Convert MatchResultDto to BatchCreateTradeDto for batch processing
+   */
+  createBatchTradeDto(
+    marketId: string,
+    takerOrderId: string,
+    makerOrderId: string,
+    takerSide: "bid" | "ask",
+    quantity: number,
+    price: number,
+    timestamp: Date = new Date(),
+  ): BatchCreateTradeDto {
+    return {
+      tradeId: uuidv4(),
+      marketId,
+      takerOrderId,
+      makerOrderId,
+      takerSide,
+      quantity,
+      price,
+      timestamp,
+    };
+  }
+
+  /**
+   * Map database record to TradeDto
+   */
+  private mapRecordToDto(record: any): TradeDto {
+    const dto = new TradeDto();
+    dto.id = record.id;
+    dto.tradeId = record.trade_id;
+    dto.marketId = record.market_id;
+    dto.takerOrderId = record.taker_order_id;
+    dto.makerOrderId = record.maker_order_id;
+    dto.takerSide = record.taker_side;
+    dto.quantity = parseFloat(record.quantity);
+    dto.price = parseFloat(record.price);
+    dto.takerUserId = record.taker_user_id;
+    dto.makerUserId = record.maker_user_id;
+    dto.createdAt = record.created_at;
+    dto.updatedAt = record.updated_at;
+    return dto;
   }
 }

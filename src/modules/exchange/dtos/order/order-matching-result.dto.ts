@@ -1,6 +1,6 @@
 import { ApiProperty } from "@nestjs/swagger";
 import { MatchResultDto } from "./match-result.dto";
-import { OrderBookEntryDto } from "../order-book/order-book-entry.dto";
+import { OrderBookEntryDto } from "../order/order-book-entry.dto";
 
 export class OrderUpdateDto {
   @ApiProperty({

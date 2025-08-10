@@ -1,4 +1,4 @@
-import { MatchResultDto } from "../../dtos/order-matching/match-result.dto";
+import { MatchResultDto } from "../../dtos/order/match-result.dto";
 
 export class OrderMatchEvent {
   readonly eventType = "ORDER_MATCH" as const;
