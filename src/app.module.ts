@@ -13,6 +13,7 @@ import redisConfig from "@/config/redis.config";
 import { LoggerModule } from "nestjs-pino";
 import { ProfileModule } from "@/modules/profiles/profile.module";
 import { SocketModule } from "@/modules/socket/socket.module";
+import { ExchangeModule } from "@/modules/exchange/exchange.module";
 import helmet from "helmet";
 import { AllExceptionFilter } from "@/filters/all-exception.filter";
 import cookieConfig from "@/config/cookie.config";
@@ -101,6 +102,7 @@ import frontendConfig from "@/config/frontend.config";
     AuthModule.forRoot(auth),
     ProfileModule,
     SocketModule,
+    ExchangeModule,
   ],
   providers: [
     {

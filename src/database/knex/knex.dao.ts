@@ -5,12 +5,10 @@ import { Injectable } from "@nestjs/common";
 
 @Injectable()
 export abstract class KnexDao<T extends KnexDao<T>> {
-  private readonly createInstance: new (knex: Knex) => T;
-
   constructor(@InjectConnection() protected readonly knex: Knex) {}
 
-  async transaction<T>(
-    callback: (transaction: BaseTransaction<Knex.Transaction>) => Promise<T>,
+  async transaction<R>(
+    callback: (transaction: BaseTransaction<Knex.Transaction>) => Promise<R>,
   ) {
     return await this.knex.transaction(async (knexTransaction) => {
       const baseTransaction = new BaseTransaction(knexTransaction);
@@ -19,6 +17,8 @@ export abstract class KnexDao<T extends KnexDao<T>> {
   }
 
   transacting(transaction: BaseTransaction<Knex.Transaction>): T {
-    return new this.createInstance(transaction.instance());
+    // Create a new instance of the same class with the transaction knex
+    const TransactionalClass = this.constructor as new (knex: Knex) => T;
+    return new TransactionalClass(transaction.instance());
   }
 }
