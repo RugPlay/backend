@@ -19,24 +19,22 @@ import {
   ApiBody,
 } from "@nestjs/swagger";
 import { MarketService } from "../services/market.service";
-import { OrderMatchingService } from "../services/order-matching.service";
-import { OrderBookService } from "../services/order-book.service";
 import type { MarketCategory } from "../types/market-category";
 import { MarketDto } from "../dtos/market/market.dto";
 import { CreateMarketDto } from "../dtos/market/create-market.dto";
 import { UpdateMarketDto } from "../dtos/market/update-market.dto";
 import { MarketFiltersDto } from "../dtos/market/market-filters.dto";
-import { OrderMatchingResultDto } from "../dtos/order-matching/order-matching-result.dto";
 import { TradeExecutionDto } from "../dtos/trade/trade-execution.dto";
 import { v4 as uuidv4 } from "uuid";
+import { OrderService } from "../services/order.service";
+import { OrderMatchingResultDto } from "../dtos/order/order-matching-result.dto";
 
 @ApiTags("markets")
 @Controller("markets")
 export class MarketController {
   constructor(
     private readonly marketService: MarketService,
-    private readonly orderMatchingService: OrderMatchingService,
-    private readonly orderBookService: OrderBookService,
+    private readonly orderService: OrderService,
   ) {}
 
   @Post()
@@ -296,6 +294,7 @@ export class MarketController {
       side: "bid" | "ask";
       price: number;
       quantity: number;
+      portfolioId: string;
     },
   ): Promise<OrderMatchingResultDto> {
     try {
@@ -315,7 +314,7 @@ export class MarketController {
       }
 
       // Check if market exists
-      const marketExists = await this.orderBookService.hasOrderBook(marketId);
+      const marketExists = await this.orderService.hasOrderBook(marketId);
       if (!marketExists) {
         throw new HttpException(
           `Market ${marketId} not found`,
@@ -330,10 +329,12 @@ export class MarketController {
         side: orderRequest.side,
         price: orderRequest.price,
         quantity: orderRequest.quantity,
+        portfolioId: orderRequest.portfolioId,
       };
 
       // Place order with matching
-      const result = await this.orderBookService.addOrderWithMatching(
+      // Add missing portfolioId to order object for type compatibility
+      const result = await this.orderService.addOrderWithMatching(
         marketId,
         order,
       );
@@ -356,6 +357,7 @@ export class MarketController {
               marketId: result.remainingOrder.marketId,
               price: result.remainingOrder.price,
               quantity: result.remainingOrder.quantity,
+              portfolioId: result.remainingOrder.portfolioId,
               timestamp: result.remainingOrder.timestamp,
               orderId: result.remainingOrder.orderId,
               side: result.remainingOrder.side,
@@ -407,7 +409,7 @@ export class MarketController {
   ): Promise<TradeExecutionDto[]> {
     try {
       // Check if market exists
-      const marketExists = await this.orderBookService.hasOrderBook(marketId);
+      const marketExists = await this.orderService.hasOrderBook(marketId);
       if (!marketExists) {
         throw new HttpException(
           `Market ${marketId} not found`,
@@ -415,7 +417,7 @@ export class MarketController {
         );
       }
 
-      const trades = await this.orderMatchingService.getRecentTrades(
+      const trades = await this.orderService.getRecentTrades(
         marketId,
         limit || 50,
       );
@@ -479,7 +481,7 @@ export class MarketController {
   ): Promise<{ marketId: string; lastPrice: number | null }> {
     try {
       // Check if market exists
-      const marketExists = await this.orderBookService.hasOrderBook(marketId);
+      const marketExists = await this.orderService.hasOrderBook(marketId);
       if (!marketExists) {
         throw new HttpException(
           `Market ${marketId} not found`,
@@ -487,8 +489,7 @@ export class MarketController {
         );
       }
 
-      const lastPrice =
-        await this.orderMatchingService.getLastTradePrice(marketId);
+      const lastPrice = await this.orderService.getLastTradePrice(marketId);
 
       return {
         marketId,
@@ -569,7 +570,7 @@ export class MarketController {
       }
 
       // Check if market exists
-      const marketExists = await this.orderBookService.hasOrderBook(marketId);
+      const marketExists = await this.orderService.hasOrderBook(marketId);
       if (!marketExists) {
         throw new HttpException(
           `Market ${marketId} not found`,
@@ -578,7 +579,7 @@ export class MarketController {
       }
 
       // Cancel the order
-      const success = await this.orderBookService.removeOrder(
+      const success = await this.orderService.removeOrder(
         marketId,
         orderId,
         body.side,
