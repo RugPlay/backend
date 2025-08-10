@@ -9,6 +9,12 @@ export async function up(knex: Knex): Promise<void> {
       .references("id")
       .inTable("markets")
       .onDelete("CASCADE");
+    table
+      .uuid("portfolio_id")
+      .notNullable()
+      .references("id")
+      .inTable("portfolios")
+      .onDelete("CASCADE");
     table.enum("side", ["bid", "ask"]).notNullable();
     table.decimal("price", 20, 8).notNullable(); // Support high precision prices
     table.decimal("quantity", 20, 8).notNullable(); // Support high precision quantities
@@ -17,6 +23,9 @@ export async function up(knex: Knex): Promise<void> {
 
     // Composite index for efficient order book queries
     table.index(["market_id", "side", "price"]);
+
+    // Index for efficient portfolio-based queries
+    table.index(["portfolio_id"]);
 
     // Index for order lookup by ID
     table.index(["id"]);
