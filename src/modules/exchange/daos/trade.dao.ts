@@ -2,7 +2,9 @@ import { Injectable } from "@nestjs/common";
 import { KnexDao } from "@/database/knex/knex.dao";
 import { TradeExecutionDto } from "../dtos/trade/trade-execution.dto";
 import { TradeDto } from "../dtos/trade/trade.dto";
-import { BatchCreateTradeDto, BatchTradeOperationResultDto } from "../dtos/trade/batch-create-trade.dto";
+import { BatchCreateTradeDto } from "../dtos/trade/batch-create-trade.dto";
+import { BatchTradeOperationResultDto } from "../dtos/trade/batch-trade-operation-result.dto";
+import { TradeType } from "../types/trade-type";
 import { v4 as uuidv4 } from "uuid";
 
 @Injectable()
@@ -21,6 +23,7 @@ export class TradeDao extends KnexDao<TradeDao> {
           taker_order_id: trade.takerOrderId,
           maker_order_id: trade.makerOrderId,
           taker_side: trade.takerSide,
+          type: trade.type,
           quantity: trade.quantity.toString(),
           price: trade.price.toString(),
           taker_user_id: trade.takerUserId,
@@ -92,12 +95,43 @@ export class TradeDao extends KnexDao<TradeDao> {
   }
 
   /**
-   * Get the last trade price for a market
+   * Get trades by market and type
    */
-  async getLastTradePrice(marketId: string): Promise<number | null> {
+  async getTradesByMarketAndType(
+    marketId: string,
+    type: TradeType,
+    limit: number = 50,
+    offset: number = 0,
+  ): Promise<TradeDto[]> {
     try {
-      const result = await this.knex(this.tableName)
+      const results = await this.knex(this.tableName)
         .where("market_id", marketId)
+        .where("type", type)
+        .orderBy("created_at", "desc")
+        .limit(limit)
+        .offset(offset);
+      return results.map((record) => this.mapRecordToDto(record));
+    } catch (error) {
+      console.error("Error fetching trades by market and type:", error);
+      return [];
+    }
+  }
+
+  /**
+   * Get the last trade price for a market, optionally filtered by type
+   */
+  async getLastTradePrice(
+    marketId: string,
+    type?: TradeType,
+  ): Promise<number | null> {
+    try {
+      let query = this.knex(this.tableName).where("market_id", marketId);
+
+      if (type) {
+        query = query.where("type", type);
+      }
+
+      const result = await query
         .orderBy("created_at", "desc")
         .select("price")
         .first();
@@ -144,6 +178,7 @@ export class TradeDao extends KnexDao<TradeDao> {
         taker_order_id: trade.takerOrderId,
         maker_order_id: trade.makerOrderId,
         taker_side: trade.takerSide,
+        type: trade.type,
         quantity: trade.quantity.toString(),
         price: trade.price.toString(),
         created_at: trade.timestamp,
@@ -154,8 +189,8 @@ export class TradeDao extends KnexDao<TradeDao> {
         .insert(tradeRecords)
         .returning("trade_id");
 
-      const createdTradeIds = results?.map((r) => r.trade_id) || 
-                             trades.map((t) => t.tradeId);
+      const createdTradeIds =
+        results?.map((r) => r.trade_id) || trades.map((t) => t.tradeId);
 
       return {
         tradesCreated: tradeRecords.length,
@@ -178,6 +213,7 @@ export class TradeDao extends KnexDao<TradeDao> {
     takerOrderId: string,
     makerOrderId: string,
     takerSide: "bid" | "ask",
+    type: TradeType,
     quantity: number,
     price: number,
     timestamp: Date = new Date(),
@@ -188,6 +224,7 @@ export class TradeDao extends KnexDao<TradeDao> {
       takerOrderId,
       makerOrderId,
       takerSide,
+      type,
       quantity,
       price,
       timestamp,
@@ -205,6 +242,7 @@ export class TradeDao extends KnexDao<TradeDao> {
     dto.takerOrderId = record.taker_order_id;
     dto.makerOrderId = record.maker_order_id;
     dto.takerSide = record.taker_side;
+    dto.type = record.type;
     dto.quantity = parseFloat(record.quantity);
     dto.price = parseFloat(record.price);
     dto.takerUserId = record.taker_user_id;

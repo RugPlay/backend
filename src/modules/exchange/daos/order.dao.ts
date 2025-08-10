@@ -2,7 +2,8 @@ import { Injectable } from "@nestjs/common";
 import { KnexDao } from "@/database/knex/knex.dao";
 import { OrderBookEntryDto } from "../dtos/order/order-book-entry.dto";
 import { OrderDto } from "../dtos/order/order.dto";
-import { BatchUpdateOrderDto, BatchOrderOperationDto } from "../dtos/order/batch-update-order.dto";
+import { BatchUpdateOrderDto } from "../dtos/order/batch-update-order.dto";
+import { BatchOrderOperationDto } from "../dtos/order/batch-order-operation.dto";
 
 @Injectable()
 export class OrderDao extends KnexDao<OrderDao> {

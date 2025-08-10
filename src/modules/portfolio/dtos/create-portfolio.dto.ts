@@ -1,11 +1,10 @@
-import { ApiProperty } from "@nestjs/swagger";
+import { OmitType } from "@nestjs/mapped-types";
+import { PortfolioDto } from "./portfolio.dto";
 
-export class CreatePortfolioDto {
-  @ApiProperty({
-    description: "Initial balance for the portfolio",
-    example: 10000.0,
-    required: false,
-    default: 0,
-  })
-  balance?: number = 0;
-}
+export class CreatePortfolioDto extends OmitType(PortfolioDto, [
+  "id",
+  "userId",
+  "holdings",
+  "createdAt",
+  "updatedAt",
+] as const) {}

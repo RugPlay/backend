@@ -427,6 +427,7 @@ export class MarketController {
         marketId: trade.marketId,
         takerOrderId: trade.takerOrderId,
         makerOrderId: trade.makerOrderId,
+        type: trade.type, // Ensure the 'type' property is included to match TradeExecutionDto
         takerSide: trade.takerSide,
         quantity: trade.quantity,
         price: trade.price,

@@ -1,5 +1,6 @@
 import { ApiProperty } from "@nestjs/swagger";
 import { HoldingDto } from "./holding.dto";
+import { PortfolioType } from "../types/portfolio-type";
 
 export class PortfolioDto {
   @ApiProperty({
@@ -19,6 +20,13 @@ export class PortfolioDto {
     example: 10000.5,
   })
   balance: number;
+
+  @ApiProperty({
+    description: "The type of portfolio (paper trading or real money)",
+    enum: ["paper", "real"],
+    example: "real",
+  })
+  type: PortfolioType;
 
   @ApiProperty({
     description: "Array of asset holdings in the portfolio",

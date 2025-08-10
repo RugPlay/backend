@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { TradeType } from "../../types/trade-type";
 
 export class TradeDto {
   @ApiProperty({
@@ -37,6 +38,13 @@ export class TradeDto {
     enum: ["bid", "ask"],
   })
   takerSide: "bid" | "ask";
+
+  @ApiProperty({
+    description: "The type of trade (paper or real)",
+    example: "real",
+    enum: ["paper", "real"],
+  })
+  type: TradeType;
 
   @ApiProperty({
     description: "The quantity that was traded",

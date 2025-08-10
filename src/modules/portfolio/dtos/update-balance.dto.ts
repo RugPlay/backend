@@ -1,9 +1,6 @@
-import { ApiProperty } from "@nestjs/swagger";
+import { PickType } from "@nestjs/mapped-types";
+import { PortfolioDto } from "./portfolio.dto";
 
-export class UpdateBalanceDto {
-  @ApiProperty({
-    description: "The new balance amount",
-    example: 15000.5,
-  })
-  balance: number;
-}
+export class UpdateBalanceDto extends PickType(PortfolioDto, [
+  "balance",
+] as const) {}

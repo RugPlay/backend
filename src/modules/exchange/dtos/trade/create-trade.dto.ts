@@ -1,7 +1,7 @@
 import { OmitType } from "@nestjs/mapped-types";
-import { MarketDto } from "./market.dto";
+import { TradeDto } from "./trade.dto";
 
-export class CreateMarketDto extends OmitType(MarketDto, [
+export class CreateTradeDto extends OmitType(TradeDto, [
   "id",
   "createdAt",
   "updatedAt",

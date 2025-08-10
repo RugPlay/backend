@@ -50,6 +50,26 @@ export class PortfolioDao extends KnexDao<PortfolioDao> {
   }
 
   /**
+   * Get a portfolio by portfolio ID
+   */
+  async getPortfolioById(portfolioId: string): Promise<PortfolioDto | null> {
+    try {
+      const portfolio = await this.knex(this.tableName)
+        .where("id", portfolioId)
+        .first();
+
+      if (!portfolio) {
+        return null;
+      }
+
+      return this.mapRecordToDto(portfolio);
+    } catch (error) {
+      console.error("Error getting portfolio by ID:", error);
+      return null;
+    }
+  }
+
+  /**
    * Update portfolio balance
    */
   async updateBalance(userId: string, newBalance: number): Promise<boolean> {
@@ -91,7 +111,10 @@ export class PortfolioDao extends KnexDao<PortfolioDao> {
    * Add amount to portfolio balance by portfolio ID (can be negative for deduction)
    * Includes balance check to prevent negative balances
    */
-  async adjustBalanceByPortfolioId(portfolioId: string, amount: number): Promise<boolean> {
+  async adjustBalanceByPortfolioId(
+    portfolioId: string,
+    amount: number,
+  ): Promise<boolean> {
     try {
       const updated = await this.knex(this.tableName)
         .where("id", portfolioId)
@@ -103,7 +126,10 @@ export class PortfolioDao extends KnexDao<PortfolioDao> {
 
       return updated > 0;
     } catch (error) {
-      console.error("Error adjusting portfolio balance by portfolio ID:", error);
+      console.error(
+        "Error adjusting portfolio balance by portfolio ID:",
+        error,
+      );
       return false;
     }
   }
@@ -187,6 +213,7 @@ export class PortfolioDao extends KnexDao<PortfolioDao> {
     dto.id = record.id;
     dto.userId = record.user_id;
     dto.balance = parseFloat(record.balance);
+    dto.type = record.type || "real"; // Default to real if not specified
     dto.holdings = []; // Holdings should be loaded separately via service layer
     dto.createdAt = record.created_at;
     dto.updatedAt = record.updated_at;

@@ -15,11 +15,10 @@ import { Knex } from "knex";
 import { OrderMatchingResultDto } from "../dtos/order/order-matching-result.dto";
 import { MatchResultDto } from "../dtos/order/match-result.dto";
 import { OrderMatchingRequestDto } from "../dtos/order/order-matching-request.dto";
-import {
-  BatchUpdateOrderDto,
-  BatchOrderOperationDto,
-} from "../dtos/order/batch-update-order.dto";
+import { BatchUpdateOrderDto } from "../dtos/order/batch-update-order.dto";
+import { BatchOrderOperationDto } from "../dtos/order/batch-order-operation.dto";
 import { BatchCreateTradeDto } from "../dtos/trade/batch-create-trade.dto";
+import { TradeType } from "../types/trade-type";
 
 @Injectable()
 export class OrderService implements OnModuleInit {
@@ -173,6 +172,25 @@ export class OrderService implements OnModuleInit {
     }
   }
 
+  /**
+   * Check if an order is from a paper portfolio
+   */
+  private async isOrderFromPaperPortfolio(
+    portfolioId: string,
+  ): Promise<boolean> {
+    try {
+      const portfolio = await this.portfolioDao.getPortfolioById(portfolioId);
+      return portfolio?.type === "paper";
+    } catch (error) {
+      this.logger.error(
+        `Error checking portfolio type for ${portfolioId}:`,
+        error,
+      );
+      // Default to real portfolio if we can't determine the type
+      return false;
+    }
+  }
+
   // ==================== ORDER MANAGEMENT ====================
 
   /**
@@ -182,6 +200,14 @@ export class OrderService implements OnModuleInit {
     marketId: string,
     order: Omit<OrderBookEntryDto, "timestamp">,
   ): Promise<OrderMatchingResultDto> {
+    // Check if this is a paper order by looking up the portfolio type
+    const isPaperOrder = await this.isOrderFromPaperPortfolio(
+      order.portfolioId,
+    );
+    if (isPaperOrder) {
+      return await this.processPaperOrderMatching(marketId, order);
+    }
+
     // Use database transaction to ensure atomicity for portfolio adjustments and order matching
     return await this.orderDao
       .transaction(async (trx) => {
@@ -247,6 +273,113 @@ export class OrderService implements OnModuleInit {
           completedOrderIds: [],
         };
       });
+  }
+
+  /**
+   * Process paper order matching - simulates matching without affecting order book or portfolios
+   */
+  private async processPaperOrderMatching(
+    marketId: string,
+    order: Omit<OrderBookEntryDto, "timestamp">,
+  ): Promise<OrderMatchingResultDto> {
+    try {
+      // For paper orders, we still want to simulate matching but without:
+      // 1. Adding to order book
+      // 2. Affecting market state (prices/order book display)
+      // Paper portfolios ARE adjusted to reflect the simulated trades
+
+      this.logger.debug(
+        `Processing paper order matching for market ${marketId}: ${order.side} ${order.quantity} @ ${order.price}`,
+      );
+
+      // Use database transaction for paper trade creation and portfolio adjustments
+      return await this.orderDao.transaction(async (trx) => {
+        // Adjust portfolio balance and holdings for paper order (same as real orders)
+        const portfolioAdjusted = await this.adjustPortfolioForOrder(
+          order,
+          trx,
+        );
+        if (!portfolioAdjusted) {
+          this.logger.error(
+            `Failed to adjust portfolio for paper order in market: ${marketId}`,
+          );
+          throw new Error(
+            `Failed to adjust portfolio for paper order in market: ${marketId}`,
+          );
+        }
+
+        // Get current order book state for matching simulation (read-only)
+        const opposingOrders = await this.getOpposingOrdersInTransaction(
+          marketId,
+          order.side,
+          trx,
+        );
+
+        // Pre-calculate matches without modifying anything
+        const { calculatedMatches } = this.calculateAllMatches(
+          order,
+          opposingOrders,
+          order.quantity,
+        );
+
+        const matches: MatchResultDto[] = [];
+        const pendingEvents: Array<{
+          type: "orderMatch" | "orderFill" | "tradeExecution";
+          data: any;
+        }> = [];
+
+        // Create paper trades for each match (but don't modify orders)
+        if (calculatedMatches.length > 0) {
+          await this.createPaperTrades(
+            calculatedMatches,
+            trx,
+            matches,
+            pendingEvents,
+            marketId,
+            order,
+          );
+
+          // Execute trade settlements for paper trades (transfer funds/holdings between portfolios)
+          await this.settleTradesInTransaction(calculatedMatches, order, trx);
+        }
+
+        // For paper orders, always consume the entire quantity
+        // Paper orders should always be fully "filled" for simulation purposes
+        const remainingOrder: OrderBookEntryDto | null = null;
+
+        const result = {
+          matches,
+          remainingOrder,
+          updatedOrders: [], // No real orders are updated
+          completedOrderIds: [], // No real orders are completed
+        };
+
+        // Publish events after successful transaction commit (paper trade events)
+        setImmediate(async () => {
+          await this.publishPendingEvents(pendingEvents);
+        });
+
+        this.logger.debug(
+          `Paper order processed: ${matches.length} matches created, order fully filled`,
+        );
+
+        return result;
+      });
+    } catch (error) {
+      this.logger.error(
+        `Error processing paper order matching for market ${marketId}:`,
+        error,
+      );
+
+      // Return safe fallback state - paper order is fully consumed
+      // Note: Portfolio adjustments may have already occurred and been committed
+      return {
+        matches: [],
+        remainingOrder: null, // Paper orders are always fully consumed
+        updatedOrders: [],
+        completedOrderIds: [],
+      };
+    }
   }
 
   /**
@@ -615,6 +748,7 @@ export class OrderService implements OnModuleInit {
       takerOrderId: match.takerOrderId,
       makerOrderId: match.makerOrderId,
       takerSide: match.takerSide,
+      type: "real", // TODO: Determine based on user/portfolio settings
       quantity: match.matchedQuantity,
       price: match.matchedPrice,
       timestamp: match.timestamp,
@@ -633,6 +767,103 @@ export class OrderService implements OnModuleInit {
     );
 
     return trade;
+  }
+
+  /**
+   * Create paper trades without modifying orders or affecting portfolios
+   */
+  private async createPaperTrades(
+    calculatedMatches: Array<{
+      existingOrder: OrderBookEntryDto;
+      matchedQuantity: number;
+      matchedPrice: number;
+      remainingExistingQuantity: number;
+      isCompletelyFilled: boolean;
+    }>,
+    trx: BaseTransaction<Knex.Transaction<any, any[]>>,
+    matches: MatchResultDto[],
+    pendingEvents: Array<{ type: string; data: any }>,
+    marketId: string,
+    incomingOrder: Omit<OrderBookEntryDto, "timestamp">,
+  ): Promise<void> {
+    const tradeDao = this.tradeDao.transacting(trx);
+    const batchTrades: BatchCreateTradeDto[] = [];
+
+    for (const {
+      existingOrder,
+      matchedQuantity,
+      matchedPrice,
+    } of calculatedMatches) {
+      const tradeId = uuidv4();
+
+      // Create match result for paper trade (same as regular matching)
+      const match: MatchResultDto = {
+        marketId,
+        takerOrderId: incomingOrder.orderId,
+        makerOrderId: existingOrder.orderId,
+        takerSide: incomingOrder.side,
+        matchedQuantity,
+        matchedPrice,
+        timestamp: new Date(),
+        takerRemainingQuantity: 0, // Paper orders are always fully consumed
+        makerRemainingQuantity: existingOrder.quantity, // Existing orders are not affected
+      };
+
+      matches.push(match);
+
+      // Add events for paper trades
+      pendingEvents.push(
+        {
+          type: "orderMatch",
+          data: {
+            orderId: incomingOrder.orderId,
+            marketId,
+            side: incomingOrder.side,
+            matchedQuantity,
+            matchPrice: matchedPrice,
+            remainingQuantity: 0, // Paper orders are always fully filled
+          },
+        },
+        {
+          type: "tradeExecution",
+          data: {
+            tradeId,
+            marketId,
+            takerOrderId: match.takerOrderId,
+            makerOrderId: match.makerOrderId,
+            takerSide: match.takerSide,
+            quantity: match.matchedQuantity,
+            price: match.matchedPrice,
+            type: "paper", // Important: mark as paper trade
+            timestamp: match.timestamp,
+          },
+        },
+      );
+
+      // Prepare paper trade using DTO - this is the key change from regular matching
+      const tradeType: TradeType = "paper"; // Always paper for paper orders
+      batchTrades.push(
+        tradeDao.createBatchTradeDto(
+          match.marketId,
+          match.takerOrderId,
+          match.makerOrderId,
+          match.takerSide,
+          tradeType,
+          match.matchedQuantity,
+          match.matchedPrice,
+          match.timestamp,
+        ),
+      );
+    }
+
+    // Insert paper trades only (no order modifications)
+    if (batchTrades.length > 0) {
+      await tradeDao.batchCreateTrades(batchTrades);
+
+      this.logger.debug(
+        `Created ${batchTrades.length} paper trades for market ${marketId}`,
+      );
+    }
   }
 
   /**
@@ -1512,6 +1743,7 @@ export class OrderService implements OnModuleInit {
         takerOrderId: trade.takerOrderId,
         makerOrderId: trade.makerOrderId,
         takerSide: trade.takerSide,
+        type: trade.type,
         quantity: trade.quantity,
         price: trade.price,
         timestamp: trade.createdAt,
@@ -1704,12 +1936,18 @@ export class OrderService implements OnModuleInit {
       }
 
       // Prepare trade using DTO
+      // Determine trade type based on the incoming order's portfolio type
+      const isPaperTrade = await this.isOrderFromPaperPortfolio(
+        incomingOrder.portfolioId,
+      );
+      const tradeType: TradeType = isPaperTrade ? "paper" : "real";
       batchTrades.push(
         tradeDao.createBatchTradeDto(
           match.marketId,
           match.takerOrderId,
           match.makerOrderId,
           match.takerSide,
+          tradeType,
           match.matchedQuantity,
           match.matchedPrice,
           match.timestamp,
