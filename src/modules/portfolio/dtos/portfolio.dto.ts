@@ -22,8 +22,8 @@ export class PortfolioDto {
   balance: number;
 
   @ApiProperty({
-    description: "The type of portfolio (paper trading or real money)",
-    enum: ["paper", "real"],
+    description: "The type of portfolio (only real money trading supported)",
+    enum: ["real"],
     example: "real",
   })
   type: PortfolioType;

@@ -1,11 +1,11 @@
 import { Injectable } from "@nestjs/common";
-import { KnexDao } from "@/database/knex/knex.dao";
+import { KyselyDao } from "@/database/kysely/kysely.dao";
 import { CreatePortfolioDto } from "../dtos/create-portfolio.dto";
 import { PortfolioDto } from "../dtos/portfolio.dto";
+import { sql } from "kysely";
 
 @Injectable()
-export class PortfolioDao extends KnexDao<PortfolioDao> {
-  protected readonly tableName = "portfolios";
+export class PortfolioDao extends KyselyDao<PortfolioDao> {
 
   /**
    * Create a new portfolio for a user
@@ -13,14 +13,19 @@ export class PortfolioDao extends KnexDao<PortfolioDao> {
   async createPortfolio(
     userId: string,
     portfolio: CreatePortfolioDto,
+    trx?: any,
   ): Promise<string | null> {
     try {
-      const [result] = await this.knex(this.tableName)
-        .insert({
+      const db = trx || this.kysely;
+      const result = await db
+        .insertInto('portfolios')
+        .values({
           user_id: userId,
           balance: (portfolio.balance || 0).toString(),
-        })
-        .returning("id");
+          type: portfolio.type || 'real',
+        } as any)
+        .returning('id')
+        .executeTakeFirst();
 
       return result?.id || null;
     } catch (error) {
@@ -34,9 +39,11 @@ export class PortfolioDao extends KnexDao<PortfolioDao> {
    */
   async getPortfolioByUserId(userId: string): Promise<PortfolioDto | null> {
     try {
-      const portfolio = await this.knex(this.tableName)
-        .where("user_id", userId)
-        .first();
+      const portfolio = await this.kysely
+        .selectFrom('portfolios')
+        .selectAll()
+        .where('user_id', '=', userId)
+        .executeTakeFirst();
 
       if (!portfolio) {
         return null;
@@ -52,11 +59,14 @@ export class PortfolioDao extends KnexDao<PortfolioDao> {
   /**
    * Get a portfolio by portfolio ID
    */
-  async getPortfolioById(portfolioId: string): Promise<PortfolioDto | null> {
+  async getPortfolioById(portfolioId: string, trx?: any): Promise<PortfolioDto | null> {
     try {
-      const portfolio = await this.knex(this.tableName)
-        .where("id", portfolioId)
-        .first();
+      const db = trx || this.kysely;
+      const portfolio = await db
+        .selectFrom('portfolios')
+        .selectAll()
+        .where('id', '=', portfolioId)
+        .executeTakeFirst();
 
       if (!portfolio) {
         return null;
@@ -72,16 +82,19 @@ export class PortfolioDao extends KnexDao<PortfolioDao> {
   /**
    * Update portfolio balance
    */
-  async updateBalance(userId: string, newBalance: number): Promise<boolean> {
+  async updateBalance(userId: string, newBalance: number, trx?: any): Promise<boolean> {
     try {
-      const updated = await this.knex(this.tableName)
-        .where("user_id", userId)
-        .update({
+      const db = trx || this.kysely;
+      const result = await db
+        .updateTable('portfolios')
+        .set({
           balance: newBalance.toString(),
-          updated_at: this.knex.fn.now(),
-        });
+          updated_at: sql`CURRENT_TIMESTAMP`,
+        } as any)
+        .where('user_id', '=', userId)
+        .executeTakeFirst();
 
-      return updated > 0;
+      return result.numUpdatedRows > 0;
     } catch (error) {
       console.error("Error updating portfolio balance:", error);
       return false;
@@ -91,19 +104,22 @@ export class PortfolioDao extends KnexDao<PortfolioDao> {
   /**
    * Add amount to portfolio balance (can be negative for deduction)
    */
-  async adjustBalance(userId: string, amount: number): Promise<boolean> {
+  async adjustBalance(userId: string, amount: number, trx?: any): Promise<boolean> {
     try {
-      const updated = await this.knex(this.tableName)
-        .where("user_id", userId)
-        .update({
-          balance: this.knex.raw("balance + ?", [amount.toString()]),
-          updated_at: this.knex.fn.now(),
-        });
+      const db = trx || this.kysely;
+      const result = await db
+        .updateTable('portfolios')
+        .set({
+          balance: sql`balance + ${amount.toString()}`,
+          updated_at: sql`CURRENT_TIMESTAMP`,
+        })
+        .where('user_id', '=', userId)
+        .executeTakeFirst();
 
-      return updated > 0;
+      return result.numUpdatedRows > 0;
     } catch (error) {
       console.error("Error adjusting portfolio balance:", error);
-      return null;
+      return false;
     }
   }
 
@@ -116,15 +132,18 @@ export class PortfolioDao extends KnexDao<PortfolioDao> {
     amount: number,
   ): Promise<boolean> {
     try {
-      const updated = await this.knex(this.tableName)
-        .where("id", portfolioId)
-        .where("balance", ">=", Math.abs(amount < 0 ? amount : 0)) // Prevent negative balance
-        .update({
-          balance: this.knex.raw("balance + ?", [amount.toString()]),
-          updated_at: this.knex.fn.now(),
-        });
+      const minBalance = amount < 0 ? Math.abs(amount) : 0;
+      const result = await this.kysely
+        .updateTable('portfolios')
+        .set({
+          balance: sql`balance + ${amount.toString()}`,
+          updated_at: sql`CURRENT_TIMESTAMP`,
+        })
+        .where('id', '=', portfolioId)
+        .where('balance', '>=', minBalance.toString()) // Prevent negative balance
+        .executeTakeFirst();
 
-      return updated > 0;
+      return result.numUpdatedRows > 0;
     } catch (error) {
       console.error(
         "Error adjusting portfolio balance by portfolio ID:",
@@ -140,15 +159,17 @@ export class PortfolioDao extends KnexDao<PortfolioDao> {
    */
   async reserveBalance(portfolioId: string, amount: number): Promise<boolean> {
     try {
-      const updated = await this.knex(this.tableName)
-        .where("id", portfolioId)
-        .where("balance", ">=", amount) // Atomic check
-        .update({
-          balance: this.knex.raw("balance - ?", [amount.toString()]),
-          updated_at: this.knex.fn.now(),
-        });
+      const result = await this.kysely
+        .updateTable('portfolios')
+        .set({
+          balance: sql`balance - ${amount.toString()}`,
+          updated_at: sql`CURRENT_TIMESTAMP`,
+        })
+        .where('id', '=', portfolioId)
+        .where('balance', '>=', amount.toString()) // Atomic check
+        .executeTakeFirst();
 
-      return updated > 0;
+      return result.numUpdatedRows > 0;
     } catch (error) {
       console.error("Error reserving balance:", error);
       return false;
@@ -160,10 +181,11 @@ export class PortfolioDao extends KnexDao<PortfolioDao> {
    */
   async getBalance(userId: string): Promise<number | null> {
     try {
-      const result = await this.knex(this.tableName)
-        .select("balance")
-        .where("user_id", userId)
-        .first();
+      const result = await this.kysely
+        .selectFrom('portfolios')
+        .select('balance')
+        .where('user_id', '=', userId)
+        .executeTakeFirst();
 
       return result ? parseFloat(result.balance) : null;
     } catch (error) {
@@ -177,10 +199,11 @@ export class PortfolioDao extends KnexDao<PortfolioDao> {
    */
   async getBalanceByPortfolioId(portfolioId: string): Promise<number | null> {
     try {
-      const result = await this.knex(this.tableName)
-        .select("balance")
-        .where("id", portfolioId)
-        .first();
+      const result = await this.kysely
+        .selectFrom('portfolios')
+        .select('balance')
+        .where('id', '=', portfolioId)
+        .executeTakeFirst();
 
       return result ? parseFloat(result.balance) : null;
     } catch (error) {
@@ -194,13 +217,29 @@ export class PortfolioDao extends KnexDao<PortfolioDao> {
    */
   async deletePortfolio(userId: string): Promise<boolean> {
     try {
-      const deleted = await this.knex(this.tableName)
-        .where("user_id", userId)
-        .del();
+      const result = await this.kysely
+        .deleteFrom('portfolios')
+        .where('user_id', '=', userId)
+        .executeTakeFirst();
 
-      return deleted > 0;
+      return result.numDeletedRows > 0;
     } catch (error) {
       console.error("Error deleting portfolio:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Delete all portfolios (for testing)
+   */
+  async deleteAllPortfolios(): Promise<boolean> {
+    try {
+      await this.kysely
+        .deleteFrom('portfolios')
+        .execute();
+      return true;
+    } catch (error) {
+      console.error("Error deleting all portfolios:", error);
       return false;
     }
   }

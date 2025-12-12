@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Delete,
   Param,
   HttpException,
   HttpStatus,
@@ -40,13 +41,16 @@ export class OrderController {
   async getOrderBook(
     @Param("marketId") marketId: string,
   ): Promise<OrderBookDto> {
-    const orderBook = await this.orderService.getOrderBook(marketId);
-    if (!orderBook) {
+    // Check if market exists first
+    const marketExists = await this.orderService.hasOrderBook(marketId);
+    if (!marketExists) {
       throw new HttpException(
-        `Order book not found for market: ${marketId}`,
+        `Market not found: ${marketId}`,
         HttpStatus.NOT_FOUND,
       );
     }
+
+    const orderBook = await this.orderService.getOrderBook(marketId);
     return orderBook;
   }
 
@@ -160,5 +164,22 @@ export class OrderController {
       );
     }
     return depth;
+  }
+
+  @Delete(":marketId/clear")
+  @ApiOperation({ summary: "Clear order book for a market" })
+  @ApiResponse({
+    status: 200,
+    description: "Order book cleared successfully",
+  })
+  @ApiResponse({
+    status: 404,
+    description: "Market not found",
+  })
+  async clearOrderBook(
+    @Param("marketId") marketId: string,
+  ): Promise<{ message: string }> {
+    await this.orderService.clearOrderBook(marketId);
+    return { message: `Order book cleared for market ${marketId}` };
   }
 }

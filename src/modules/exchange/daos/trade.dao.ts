@@ -1,23 +1,25 @@
 import { Injectable } from "@nestjs/common";
-import { KnexDao } from "@/database/knex/knex.dao";
+import { KyselyDao } from "@/database/kysely/kysely.dao";
 import { TradeExecutionDto } from "../dtos/trade/trade-execution.dto";
 import { TradeDto } from "../dtos/trade/trade.dto";
 import { BatchCreateTradeDto } from "../dtos/trade/batch-create-trade.dto";
 import { BatchTradeOperationResultDto } from "../dtos/trade/batch-trade-operation-result.dto";
 import { TradeType } from "../types/trade-type";
 import { v4 as uuidv4 } from "uuid";
+import { sql } from "kysely";
 
 @Injectable()
-export class TradeDao extends KnexDao<TradeDao> {
-  protected readonly tableName = "trades";
+export class TradeDao extends KyselyDao<TradeDao> {
 
   /**
    * Insert a new trade execution into the database
    */
-  async createTrade(trade: TradeExecutionDto): Promise<string | null> {
+  async createTrade(trade: TradeExecutionDto, trx?: any): Promise<string | null> {
     try {
-      const [result] = await this.knex(this.tableName)
-        .insert({
+      const db = trx || this.kysely;
+      const result = await db
+        .insertInto('trades')
+        .values({
           trade_id: trade.tradeId,
           market_id: trade.marketId,
           taker_order_id: trade.takerOrderId,
@@ -28,12 +30,14 @@ export class TradeDao extends KnexDao<TradeDao> {
           price: trade.price.toString(),
           taker_user_id: trade.takerUserId,
           maker_user_id: trade.makerUserId,
-        })
-        .returning("id");
+        } as any)
+        .returning('id')
+        .executeTakeFirst();
 
       return result?.id || null;
     } catch (error) {
       console.error("Error creating trade:", error);
+      console.error("Trade data:", trade);
       return null;
     }
   }
@@ -43,9 +47,12 @@ export class TradeDao extends KnexDao<TradeDao> {
    */
   async getTradesByMarket(marketId: string): Promise<TradeDto[]> {
     try {
-      const results = await this.knex(this.tableName)
-        .where("market_id", marketId)
-        .orderBy("created_at", "desc");
+      const results = await this.kysely
+        .selectFrom('trades')
+        .selectAll()
+        .where('market_id', '=', marketId)
+        .orderBy('created_at', 'desc')
+        .execute();
       return results.map((record) => this.mapRecordToDto(record));
     } catch (error) {
       console.error("Error fetching trades by market:", error);
@@ -62,11 +69,14 @@ export class TradeDao extends KnexDao<TradeDao> {
     offset: number = 0,
   ): Promise<TradeDto[]> {
     try {
-      const results = await this.knex(this.tableName)
-        .where("market_id", marketId)
-        .orderBy("created_at", "desc")
+      const results = await this.kysely
+        .selectFrom('trades')
+        .selectAll()
+        .where('market_id', '=', marketId)
+        .orderBy('created_at', 'desc')
         .limit(limit)
-        .offset(offset);
+        .offset(offset)
+        .execute();
       return results.map((record) => this.mapRecordToDto(record));
     } catch (error) {
       console.error("Error fetching recent trades:", error);
@@ -83,10 +93,14 @@ export class TradeDao extends KnexDao<TradeDao> {
     endTime: Date,
   ): Promise<TradeDto[]> {
     try {
-      const results = await this.knex(this.tableName)
-        .where("market_id", marketId)
-        .whereBetween("created_at", [startTime, endTime])
-        .orderBy("created_at", "desc");
+      const results = await this.kysely
+        .selectFrom('trades')
+        .selectAll()
+        .where('market_id', '=', marketId)
+        .where('created_at', '>=', startTime)
+        .where('created_at', '<=', endTime)
+        .orderBy('created_at', 'desc')
+        .execute();
       return results.map((record) => this.mapRecordToDto(record));
     } catch (error) {
       console.error("Error fetching trades by time range:", error);
@@ -104,12 +118,15 @@ export class TradeDao extends KnexDao<TradeDao> {
     offset: number = 0,
   ): Promise<TradeDto[]> {
     try {
-      const results = await this.knex(this.tableName)
-        .where("market_id", marketId)
-        .where("type", type)
-        .orderBy("created_at", "desc")
+      const results = await this.kysely
+        .selectFrom('trades')
+        .selectAll()
+        .where('market_id', '=', marketId)
+        .where('type', '=', type)
+        .orderBy('created_at', 'desc')
         .limit(limit)
-        .offset(offset);
+        .offset(offset)
+        .execute();
       return results.map((record) => this.mapRecordToDto(record));
     } catch (error) {
       console.error("Error fetching trades by market and type:", error);
@@ -125,16 +142,18 @@ export class TradeDao extends KnexDao<TradeDao> {
     type?: TradeType,
   ): Promise<number | null> {
     try {
-      let query = this.knex(this.tableName).where("market_id", marketId);
+      let query = this.kysely
+        .selectFrom('trades')
+        .select('price')
+        .where('market_id', '=', marketId);
 
       if (type) {
-        query = query.where("type", type);
+        query = query.where('type', '=', type);
       }
 
       const result = await query
-        .orderBy("created_at", "desc")
-        .select("price")
-        .first();
+        .orderBy('created_at', 'desc')
+        .executeTakeFirst();
 
       return result ? parseFloat(result.price) : null;
     } catch (error) {
@@ -148,9 +167,11 @@ export class TradeDao extends KnexDao<TradeDao> {
    */
   async deleteOldTrades(olderThan: Date): Promise<number> {
     try {
-      return await this.knex(this.tableName)
-        .where("created_at", "<", olderThan)
-        .delete();
+      const result = await this.kysely
+        .deleteFrom('trades')
+        .where('created_at', '<', olderThan)
+        .executeTakeFirst();
+      return Number(result.numDeletedRows) || 0;
     } catch (error) {
       console.error("Error deleting old trades:", error);
       return 0;
@@ -185,9 +206,11 @@ export class TradeDao extends KnexDao<TradeDao> {
       }));
 
       // Perform batch insert
-      const results = await this.knex(this.tableName)
-        .insert(tradeRecords)
-        .returning("trade_id");
+      const results = await this.kysely
+        .insertInto('trades')
+        .values(tradeRecords as any)
+        .returning('trade_id')
+        .execute();
 
       const createdTradeIds =
         results?.map((r) => r.trade_id) || trades.map((t) => t.tradeId);
@@ -229,6 +252,21 @@ export class TradeDao extends KnexDao<TradeDao> {
       price,
       timestamp,
     };
+  }
+
+  /**
+   * Delete all trades (for testing)
+   */
+  async deleteAllTrades(): Promise<boolean> {
+    try {
+      await this.kysely
+        .deleteFrom('trades')
+        .execute();
+      return true;
+    } catch (error) {
+      console.error("Error deleting all trades:", error);
+      return false;
+    }
   }
 
   /**

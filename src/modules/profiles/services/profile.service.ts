@@ -11,7 +11,11 @@ export class ProfileService {
   ) {}
 
   async createProfile(data: Partial<ProfileDto>): Promise<ProfileDto> {
-    return this.profileDao.create(data);
+    const profile = await this.profileDao.create(data);
+    if (!profile) {
+      throw new Error("Failed to create profile");
+    }
+    return profile;
   }
 
   async getProfileById(id: string): Promise<ProfileDto> {

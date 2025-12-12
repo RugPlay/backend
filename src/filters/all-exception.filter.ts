@@ -40,7 +40,7 @@ export class AllExceptionFilter extends BaseExceptionFilter {
           // eventId,
           status,
         },
-        stackTrace: undefined,
+        stackTrace: undefined as string | undefined,
       };
 
       if (this.config.get<boolean>("app.debug")) {

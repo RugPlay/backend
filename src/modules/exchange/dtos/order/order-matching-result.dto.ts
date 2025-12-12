@@ -36,7 +36,7 @@ export class OrderMatchingResultDto {
       side: "bid",
     },
   })
-  remainingOrder?: OrderBookEntryDto;
+  remainingOrder?: OrderBookEntryDto | null;
 
   @ApiProperty({
     description: "Array of existing orders that were partially filled",

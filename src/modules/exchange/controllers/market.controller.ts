@@ -58,6 +58,10 @@ export class MarketController {
         HttpStatus.BAD_REQUEST,
       );
     }
+    
+    // Initialize order book for the new market
+    await this.orderService.initializeOrderBook(market.id);
+    
     return market;
   }
 
@@ -299,9 +303,9 @@ export class MarketController {
   ): Promise<OrderMatchingResultDto> {
     try {
       // Validate input
-      if (!orderRequest.side || !orderRequest.price || !orderRequest.quantity) {
+      if (!orderRequest.side || !orderRequest.price || !orderRequest.quantity || !orderRequest.portfolioId) {
         throw new HttpException(
-          "Missing required fields: side, price, quantity",
+          "Missing required fields: side, price, quantity, portfolioId",
           HttpStatus.BAD_REQUEST,
         );
       }
@@ -313,14 +317,24 @@ export class MarketController {
         );
       }
 
-      // Check if market exists
-      const marketExists = await this.orderService.hasOrderBook(marketId);
-      if (!marketExists) {
+      if (!["bid", "ask"].includes(orderRequest.side)) {
+        throw new HttpException(
+          "Side must be either 'bid' or 'ask'",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // Check if market exists using MarketService for more reliable check
+      const market = await this.marketService.getMarketById(marketId);
+      if (!market) {
         throw new HttpException(
           `Market ${marketId} not found`,
           HttpStatus.NOT_FOUND,
         );
       }
+      
+      // Ensure order book is initialized for this market
+      await this.orderService.initializeOrderBook(marketId);
 
       // Create order object
       const order = {
@@ -362,7 +376,7 @@ export class MarketController {
               orderId: result.remainingOrder.orderId,
               side: result.remainingOrder.side,
             }
-          : undefined,
+          : null,
         updatedOrders: result.updatedOrders,
         completedOrderIds: result.completedOrderIds,
       };
@@ -408,9 +422,9 @@ export class MarketController {
     @Query("limit") limit?: number,
   ): Promise<TradeExecutionDto[]> {
     try {
-      // Check if market exists
-      const marketExists = await this.orderService.hasOrderBook(marketId);
-      if (!marketExists) {
+      // Check if market exists using MarketService for more reliable check
+      const market = await this.marketService.getMarketById(marketId);
+      if (!market) {
         throw new HttpException(
           `Market ${marketId} not found`,
           HttpStatus.NOT_FOUND,
@@ -444,6 +458,116 @@ export class MarketController {
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  @Get(":marketId/stats")
+  @ApiOperation({
+    summary: "Get market statistics",
+    description: "Retrieves comprehensive statistics for a market",
+  })
+  @ApiParam({
+    name: "marketId",
+    description: "The unique identifier of the market",
+    example: "123e4567-e89b-12d3-a456-426614174000",
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Market statistics retrieved successfully",
+    schema: {
+      type: "object",
+      properties: {
+        marketId: { type: "string" },
+        totalVolume: { type: "number" },
+        lastPrice: { type: "number" },
+        priceChange24h: { type: "number" },
+        high24h: { type: "number" },
+        low24h: { type: "number" },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: "Market not found",
+  })
+  async getMarketStats(
+    @Param("marketId") marketId: string,
+  ): Promise<{
+    marketId: string;
+    totalVolume: number;
+    lastPrice: number | null;
+    priceChange24h: number;
+    high24h: number | null;
+    low24h: number | null;
+  }> {
+    try {
+      // Check if market exists using MarketService for more reliable check
+      const market = await this.marketService.getMarketById(marketId);
+      if (!market) {
+        throw new HttpException(
+          `Market ${marketId} not found`,
+          HttpStatus.NOT_FOUND,
+        );
+      }
+
+      // Get basic stats (for now, return mock data - can be enhanced later)
+      const lastPrice = await this.orderService.getLastTradePrice(marketId);
+      const recentTrades = await this.orderService.getRecentTrades(marketId, 100);
+      
+      // Calculate basic statistics
+      const totalVolume = recentTrades.reduce((sum, trade) => sum + (trade.price * trade.quantity), 0);
+      const prices = recentTrades.map(trade => trade.price);
+      const high24h = prices.length > 0 ? Math.max(...prices) : null;
+      const low24h = prices.length > 0 ? Math.min(...prices) : null;
+
+      return {
+        marketId,
+        totalVolume,
+        lastPrice,
+        priceChange24h: 0, // TODO: Calculate actual 24h change
+        high24h,
+        low24h,
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException(
+        "Internal server error while retrieving market stats",
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get(":marketId/trades")
+  @ApiOperation({
+    summary: "Get recent trades for a market (alias for recent-trades)",
+    description: "Retrieves the most recent trade executions for a specific market",
+  })
+  @ApiParam({
+    name: "marketId",
+    description: "The unique identifier of the market",
+    example: "123e4567-e89b-12d3-a456-426614174000",
+  })
+  @ApiQuery({
+    name: "limit",
+    description: "Maximum number of trades to return",
+    required: false,
+    example: 50,
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Recent trades retrieved successfully",
+    type: [TradeExecutionDto],
+  })
+  @ApiResponse({
+    status: 404,
+    description: "Market not found",
+  })
+  async getTrades(
+    @Param("marketId") marketId: string,
+    @Query("limit") limit?: number,
+  ): Promise<TradeExecutionDto[]> {
+    return this.getRecentTrades(marketId, limit);
   }
 
   @Get(":marketId/last-price")
@@ -481,9 +605,9 @@ export class MarketController {
     @Param("marketId") marketId: string,
   ): Promise<{ marketId: string; lastPrice: number | null }> {
     try {
-      // Check if market exists
-      const marketExists = await this.orderService.hasOrderBook(marketId);
-      if (!marketExists) {
+      // Check if market exists using MarketService for more reliable check
+      const market = await this.marketService.getMarketById(marketId);
+      if (!market) {
         throw new HttpException(
           `Market ${marketId} not found`,
           HttpStatus.NOT_FOUND,
@@ -570,9 +694,9 @@ export class MarketController {
         );
       }
 
-      // Check if market exists
-      const marketExists = await this.orderService.hasOrderBook(marketId);
-      if (!marketExists) {
+      // Check if market exists using MarketService for more reliable check
+      const market = await this.marketService.getMarketById(marketId);
+      if (!market) {
         throw new HttpException(
           `Market ${marketId} not found`,
           HttpStatus.NOT_FOUND,

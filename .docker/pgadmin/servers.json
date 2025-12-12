@@ -1,0 +1,15 @@
+{
+    "Servers": {
+      "1": {
+        "Name": "StonkWar PostgreSQL",
+        "Group": "Servers",
+        "Host": "postgres",
+        "Port": 5432,
+        "MaintenanceDB": "stonkwar",
+        "Username": "postgres",
+        "SSLMode": "prefer",
+        "PassFile": "/var/lib/pgadmin/pgpass",
+        "Comment": "Auto-configured PostgreSQL server for StonkWar"
+      }
+    }
+  }

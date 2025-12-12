@@ -1,30 +1,34 @@
 import { Injectable } from "@nestjs/common";
-import { KnexDao } from "@/database/knex/knex.dao";
+import { KyselyDao } from "@/database/kysely/kysely.dao";
 import { OrderBookEntryDto } from "../dtos/order/order-book-entry.dto";
 import { OrderDto } from "../dtos/order/order.dto";
 import { BatchUpdateOrderDto } from "../dtos/order/batch-update-order.dto";
 import { BatchOrderOperationDto } from "../dtos/order/batch-order-operation.dto";
+import { sql } from "kysely";
 
 @Injectable()
-export class OrderDao extends KnexDao<OrderDao> {
-  protected readonly tableName = "orders";
+export class OrderDao extends KyselyDao<OrderDao> {
 
   /**
    * Insert a new order into the database
    */
   async createOrder(
     order: Omit<OrderBookEntryDto, "timestamp">,
+    trx?: any,
   ): Promise<string | null> {
     try {
-      const [result] = await this.knex(this.tableName)
-        .insert({
+      const db = trx || this.kysely;
+      const result = await db
+        .insertInto('orders')
+        .values({
           market_id: order.marketId,
           portfolio_id: order.portfolioId,
           side: order.side,
           price: order.price.toString(),
           quantity: order.quantity.toString(),
-        })
-        .returning("id");
+        } as any)
+        .returning('id')
+        .executeTakeFirst();
 
       return result?.id || null;
     } catch (error) {
@@ -38,10 +42,13 @@ export class OrderDao extends KnexDao<OrderDao> {
    */
   async getOrdersByMarket(marketId: string): Promise<OrderDto[]> {
     try {
-      const results = await this.knex(this.tableName)
-        .where("market_id", marketId)
-        .orderBy("price", "desc") // Bids first (highest to lowest)
-        .orderBy("side", "asc"); // Then asks (lowest to highest)
+      const results = await this.kysely
+        .selectFrom('orders')
+        .selectAll()
+        .where('market_id', '=', marketId)
+        .orderBy('price', 'desc') // Bids first (highest to lowest)
+        .orderBy('side', 'asc') // Then asks (lowest to highest)
+        .execute();
       return results.map((record) => this.mapRecordToDto(record));
     } catch (error) {
       console.error("Error fetching orders by market:", error);
@@ -58,10 +65,13 @@ export class OrderDao extends KnexDao<OrderDao> {
   ): Promise<OrderDto[]> {
     try {
       const orderBy = side === "bid" ? "desc" : "asc";
-      const results = await this.knex(this.tableName)
-        .where("market_id", marketId)
-        .where("side", side)
-        .orderBy("price", orderBy);
+      const results = await this.kysely
+        .selectFrom('orders')
+        .selectAll()
+        .where('market_id', '=', marketId)
+        .where('side', '=', side)
+        .orderBy('price', orderBy)
+        .execute();
       return results.map((record) => this.mapRecordToDto(record));
     } catch (error) {
       console.error("Error fetching orders by market and side:", error);
@@ -78,12 +88,15 @@ export class OrderDao extends KnexDao<OrderDao> {
   ): Promise<OrderDto[]> {
     try {
       const orderBy = side === "bid" ? "desc" : "asc";
-      const results = await this.knex(this.tableName)
-        .where("market_id", marketId)
-        .where("side", side)
-        .orderBy("price", orderBy)
-        .orderBy("created_at", "asc") // Time priority
-        .forUpdate(); // Row-level locking
+      const results = await this.kysely
+        .selectFrom('orders')
+        .selectAll()
+        .where('market_id', '=', marketId)
+        .where('side', '=', side)
+        .orderBy('price', orderBy)
+        .orderBy('created_at', 'asc') // Time priority
+        .forUpdate()
+        .execute();
       return results.map((record) => this.mapRecordToDto(record));
     } catch (error) {
       console.error("Error fetching orders by market and side for matching:", error);
@@ -96,10 +109,11 @@ export class OrderDao extends KnexDao<OrderDao> {
    */
   async deleteOrder(orderId: string): Promise<boolean> {
     try {
-      const deletedCount = await this.knex(this.tableName)
-        .where("id", orderId)
-        .delete();
-      return deletedCount > 0;
+      const result = await this.kysely
+        .deleteFrom('orders')
+        .where('id', '=', orderId)
+        .executeTakeFirst();
+      return result.numDeletedRows > 0;
     } catch (error) {
       console.error("Error deleting order:", error);
       return false;
@@ -111,7 +125,10 @@ export class OrderDao extends KnexDao<OrderDao> {
    */
   async deleteOrdersByMarket(marketId: string): Promise<boolean> {
     try {
-      await this.knex(this.tableName).where("market_id", marketId).delete();
+      await this.kysely
+        .deleteFrom('orders')
+        .where('market_id', '=', marketId)
+        .execute();
       return true;
     } catch (error) {
       console.error("Error deleting orders by market:", error);
@@ -124,13 +141,32 @@ export class OrderDao extends KnexDao<OrderDao> {
    */
   async getMarketIds(): Promise<string[]> {
     try {
-      const results = await this.knex(this.tableName)
-        .distinct("market_id")
-        .pluck("market_id");
-      return results;
+      const results = await this.kysely
+        .selectFrom('orders')
+        .select('market_id')
+        .distinct()
+        .execute();
+      return results.map(row => row.market_id);
     } catch (error) {
       console.error("Error fetching market IDs:", error);
       return [];
+    }
+  }
+
+  /**
+   * Check if a market exists in the markets table
+   */
+  async marketExists(marketId: string): Promise<boolean> {
+    try {
+      const result = await this.kysely
+        .selectFrom('markets')
+        .select('id')
+        .where('id', '=', marketId)
+        .executeTakeFirst();
+      return !!result;
+    } catch (error) {
+      console.error("Error checking if market exists:", error);
+      return false;
     }
   }
 
@@ -142,13 +178,15 @@ export class OrderDao extends KnexDao<OrderDao> {
     quantity: number,
   ): Promise<boolean> {
     try {
-      const updatedCount = await this.knex(this.tableName)
-        .where("id", orderId)
-        .update({
+      const result = await this.kysely
+        .updateTable('orders')
+        .set({
           quantity: quantity.toString(),
-          updated_at: this.knex.fn.now(),
-        });
-      return updatedCount > 0;
+          updated_at: sql`CURRENT_TIMESTAMP`,
+        })
+        .where('id', '=', orderId)
+        .executeTakeFirst();
+      return result.numUpdatedRows > 0;
     } catch (error) {
       console.error("Error updating order quantity:", error);
       return false;
@@ -166,28 +204,35 @@ export class OrderDao extends KnexDao<OrderDao> {
     }
 
     try {
-      const orderIds = updates.map((u) => u.orderId);
-      const cases = updates
-        .map((u) => `WHEN id = ? THEN ?`)
-        .join(" ");
+      // For now, use individual updates in a transaction for simplicity
+      // This can be optimized later with a proper CASE statement
+      let successCount = 0;
+      const failedOrderIds: string[] = [];
 
-      // Flatten the parameters: [id1, quantity1, id2, quantity2, ...]
-      const caseParams = updates.flatMap((u) => [u.orderId, u.newQuantity.toString()]);
-      const whereParams = orderIds;
-
-      const result = await this.knex.raw(
-        `
-        UPDATE ${this.tableName} 
-        SET quantity = CASE ${cases} END,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id IN (${orderIds.map(() => "?").join(",")})
-        `,
-        [...caseParams, ...whereParams],
-      );
+      for (const update of updates) {
+        try {
+          const result = await this.kysely
+            .updateTable('orders')
+            .set({
+              quantity: update.newQuantity.toString(),
+              updated_at: sql`CURRENT_TIMESTAMP`,
+            })
+            .where('id', '=', update.orderId)
+            .executeTakeFirst();
+          
+          if (result.numUpdatedRows > 0) {
+            successCount++;
+          } else {
+            failedOrderIds.push(update.orderId);
+          }
+        } catch (error) {
+          failedOrderIds.push(update.orderId);
+        }
+      }
 
       return {
-        successCount: result.rowCount || updates.length,
-        failedOrderIds: [],
+        successCount,
+        failedOrderIds,
       };
     } catch (error) {
       console.error("Error in batch update order quantities:", error);
@@ -209,12 +254,13 @@ export class OrderDao extends KnexDao<OrderDao> {
     }
 
     try {
-      const deletedCount = await this.knex(this.tableName)
-        .whereIn("id", orderIds)
-        .delete();
+      const result = await this.kysely
+        .deleteFrom('orders')
+        .where('id', 'in', orderIds)
+        .executeTakeFirst();
 
       return {
-        deletedCount,
+        deletedCount: Number(result.numDeletedRows),
         failedOrderIds: [],
       };
     } catch (error) {
@@ -258,6 +304,39 @@ export class OrderDao extends KnexDao<OrderDao> {
           failedOrderIds: operations.deletes,
         },
       };
+    }
+  }
+
+  /**
+   * Get an order by ID
+   */
+  async getOrderById(orderId: string): Promise<OrderDto | null> {
+    try {
+      const result = await this.kysely
+        .selectFrom('orders')
+        .selectAll()
+        .where('id', '=', orderId)
+        .executeTakeFirst();
+      
+      return result ? this.mapRecordToDto(result) : null;
+    } catch (error) {
+      console.error("Error fetching order by ID:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Delete all orders (for testing)
+   */
+  async deleteAllOrders(): Promise<boolean> {
+    try {
+      await this.kysely
+        .deleteFrom('orders')
+        .execute();
+      return true;
+    } catch (error) {
+      console.error("Error deleting all orders:", error);
+      return false;
     }
   }
 

@@ -1,19 +1,22 @@
 import { Injectable } from "@nestjs/common";
-import { KnexDao } from "@/database/knex/knex.dao";
+import { KyselyDao } from "@/database/kysely/kysely.dao";
 import { HoldingDto } from "../dtos/holding.dto";
+import { sql } from "kysely";
 
 @Injectable()
-export class HoldingDao extends KnexDao<HoldingDao> {
-  protected readonly tableName = "holdings";
+export class HoldingDao extends KyselyDao<HoldingDao> {
 
   /**
    * Get all holdings for a portfolio
    */
   async getHoldingsByPortfolioId(portfolioId: string): Promise<HoldingDto[]> {
     try {
-      const holdings = await this.knex(this.tableName)
-        .where("portfolio_id", portfolioId)
-        .orderBy("created_at", "desc");
+      const holdings = await this.kysely
+        .selectFrom('holdings')
+        .selectAll()
+        .where('portfolio_id', '=', portfolioId)
+        .orderBy('created_at', 'desc')
+        .execute();
 
       return (holdings || []).map((holding) => this.mapRecordToDto(holding));
     } catch (error) {
@@ -29,15 +32,22 @@ export class HoldingDao extends KnexDao<HoldingDao> {
     portfolioId: string,
   ): Promise<HoldingDto[]> {
     try {
-      const holdings = await this.knex(this.tableName)
-        .leftJoin("markets", "holdings.market_id", "markets.id")
-        .select(
-          "holdings.*",
-          "markets.symbol as market_symbol",
-          "markets.name as market_name",
-        )
-        .where("holdings.portfolio_id", portfolioId)
-        .orderBy("holdings.created_at", "desc");
+      const holdings = await this.kysely
+        .selectFrom('holdings')
+        .leftJoin('markets', 'holdings.market_id', 'markets.id')
+        .select([
+          'holdings.id',
+          'holdings.portfolio_id',
+          'holdings.market_id',
+          'holdings.quantity',
+          'holdings.created_at',
+          'holdings.updated_at',
+          'markets.symbol as market_symbol',
+          'markets.name as market_name',
+        ])
+        .where('holdings.portfolio_id', '=', portfolioId)
+        .orderBy('holdings.created_at', 'desc')
+        .execute();
 
       return (holdings || []).map((holding) =>
         this.mapRecordWithMarketToDto(holding),
@@ -59,10 +69,12 @@ export class HoldingDao extends KnexDao<HoldingDao> {
     marketId: string,
   ): Promise<HoldingDto | null> {
     try {
-      const holding = await this.knex(this.tableName)
-        .where("portfolio_id", portfolioId)
-        .where("market_id", marketId)
-        .first();
+      const holding = await this.kysely
+        .selectFrom('holdings')
+        .selectAll()
+        .where('portfolio_id', '=', portfolioId)
+        .where('market_id', '=', marketId)
+        .executeTakeFirst();
 
       if (!holding) {
         return null;
@@ -84,17 +96,20 @@ export class HoldingDao extends KnexDao<HoldingDao> {
     quantity: number,
   ): Promise<boolean> {
     try {
-      await this.knex(this.tableName)
-        .insert({
+      await this.kysely
+        .insertInto('holdings')
+        .values({
           portfolio_id: portfolioId,
           market_id: marketId,
           quantity: quantity.toString(),
-        })
-        .onConflict(["portfolio_id", "market_id"])
-        .merge({
-          quantity: this.knex.raw("holdings.quantity + EXCLUDED.quantity"),
-          updated_at: this.knex.fn.now(),
-        });
+        } as any)
+        .onConflict((oc) => 
+          oc.columns(['portfolio_id', 'market_id']).doUpdateSet({
+            quantity: sql`holdings.quantity + EXCLUDED.quantity`,
+            updated_at: sql`CURRENT_TIMESTAMP`,
+          } as any)
+        )
+        .execute();
 
       return true;
     } catch (error) {
@@ -112,17 +127,20 @@ export class HoldingDao extends KnexDao<HoldingDao> {
     quantity: number,
   ): Promise<boolean> {
     try {
-      await this.knex(this.tableName)
-        .insert({
+      await this.kysely
+        .insertInto('holdings')
+        .values({
           portfolio_id: portfolioId,
           market_id: marketId,
           quantity: quantity.toString(),
-        })
-        .onConflict(["portfolio_id", "market_id"])
-        .merge({
-          quantity: quantity.toString(),
-          updated_at: this.knex.fn.now(),
-        });
+        } as any)
+        .onConflict((oc) => 
+          oc.columns(['portfolio_id', 'market_id']).doUpdateSet({
+            quantity: quantity.toString(),
+            updated_at: sql`CURRENT_TIMESTAMP`,
+          } as any)
+        )
+        .execute();
 
       return true;
     } catch (error) {
@@ -139,36 +157,46 @@ export class HoldingDao extends KnexDao<HoldingDao> {
     portfolioId: string,
     marketId: string,
     deltaQuantity: number,
+    trx?: any,
   ): Promise<boolean> {
     try {
+      const db = trx || this.kysely;
+      
       // For negative deltas, check we have sufficient quantity
       if (deltaQuantity < 0) {
-        const updated = await this.knex(this.tableName)
-          .where("portfolio_id", portfolioId)
-          .where("market_id", marketId)
-          .where("quantity", ">=", Math.abs(deltaQuantity)) // Prevent negative holdings
-          .update({
-            quantity: this.knex.raw("quantity + ?", [deltaQuantity.toString()]),
-            updated_at: this.knex.fn.now(),
-          });
-        return updated > 0;
+        const result = await db
+          .updateTable('holdings')
+          .set({
+            quantity: sql`quantity + ${deltaQuantity.toString()}`,
+            updated_at: sql`CURRENT_TIMESTAMP`,
+          })
+          .where('portfolio_id', '=', portfolioId)
+          .where('market_id', '=', marketId)
+          .where('quantity', '>=', Math.abs(deltaQuantity).toString()) // Prevent negative holdings
+          .executeTakeFirst();
+        return result.numUpdatedRows > 0;
       } else {
         // For positive deltas, try to update existing holding
-        const updated = await this.knex(this.tableName)
-          .where("portfolio_id", portfolioId)
-          .where("market_id", marketId)
-          .update({
-            quantity: this.knex.raw("quantity + ?", [deltaQuantity.toString()]),
-            updated_at: this.knex.fn.now(),
-          });
+        const result = await db
+          .updateTable('holdings')
+          .set({
+            quantity: sql`quantity + ${deltaQuantity.toString()}`,
+            updated_at: sql`CURRENT_TIMESTAMP`,
+          })
+          .where('portfolio_id', '=', portfolioId)
+          .where('market_id', '=', marketId)
+          .executeTakeFirst();
 
         // If no existing holding, create a new one
-        if (updated === 0) {
-          await this.knex(this.tableName).insert({
-            portfolio_id: portfolioId,
-            market_id: marketId,
-            quantity: deltaQuantity.toString(),
-          });
+        if (Number(result.numUpdatedRows) === 0) {
+          await db
+            .insertInto('holdings')
+            .values({
+              portfolio_id: portfolioId,
+              market_id: marketId,
+              quantity: deltaQuantity.toString(),
+            } as any)
+            .execute();
         }
         return true;
       }
@@ -188,16 +216,18 @@ export class HoldingDao extends KnexDao<HoldingDao> {
     quantity: number,
   ): Promise<boolean> {
     try {
-      const updated = await this.knex(this.tableName)
-        .where("portfolio_id", portfolioId)
-        .where("market_id", marketId)
-        .where("quantity", ">=", quantity) // Atomic check
-        .update({
-          quantity: this.knex.raw("quantity - ?", [quantity.toString()]),
-          updated_at: this.knex.fn.now(),
-        });
+      const result = await this.kysely
+        .updateTable('holdings')
+        .set({
+          quantity: sql`quantity - ${quantity.toString()}`,
+          updated_at: sql`CURRENT_TIMESTAMP`,
+        })
+        .where('portfolio_id', '=', portfolioId)
+        .where('market_id', '=', marketId)
+        .where('quantity', '>=', quantity.toString()) // Atomic check
+        .executeTakeFirst();
 
-      return updated > 0;
+      return result.numUpdatedRows > 0;
     } catch (error) {
       console.error("Error reserving holding:", error);
       return false;
@@ -209,14 +239,16 @@ export class HoldingDao extends KnexDao<HoldingDao> {
    */
   async cleanupZeroHoldings(portfolioId?: string): Promise<number> {
     try {
-      let query = this.knex(this.tableName).where("quantity", "<=", "0");
+      let query = this.kysely
+        .deleteFrom('holdings')
+        .where('quantity', '<=', '0');
 
       if (portfolioId) {
-        query = query.where("portfolio_id", portfolioId);
+        query = query.where('portfolio_id', '=', portfolioId);
       }
 
-      const deleted = await query.del();
-      return deleted;
+      const result = await query.executeTakeFirst();
+      return Number(result.numDeletedRows) || 0;
     } catch (error) {
       console.error("Error cleaning up zero holdings:", error);
       return 0;
@@ -228,11 +260,29 @@ export class HoldingDao extends KnexDao<HoldingDao> {
    */
   async deletePortfolioHoldings(portfolioId: string): Promise<boolean> {
     try {
-      await this.knex(this.tableName).where("portfolio_id", portfolioId).del();
+      await this.kysely
+        .deleteFrom('holdings')
+        .where('portfolio_id', '=', portfolioId)
+        .execute();
 
       return true;
     } catch (error) {
       console.error("Error deleting portfolio holdings:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Delete all holdings (for testing)
+   */
+  async deleteAllHoldings(): Promise<boolean> {
+    try {
+      await this.kysely
+        .deleteFrom('holdings')
+        .execute();
+      return true;
+    } catch (error) {
+      console.error("Error deleting all holdings:", error);
       return false;
     }
   }

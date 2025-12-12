@@ -7,6 +7,8 @@ import { NestExpressApplication } from "@nestjs/platform-express";
 import { SocketIOAdapter } from "./socketio.adapter";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { REDIS_CLIENT } from "./redis/constants/redis.constants";
+import { ConsoleLogger } from "@nestjs/common";
+import appConfig from "./config/app.config";
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -15,11 +17,14 @@ async function bootstrap() {
       credentials: true,
     },
     bodyParser: false,
+    logger: new ConsoleLogger({
+      prefix: appConfig.name
+    }),
   });
 
   const config = app.get(ConfigService);
   const logger = app.get(Logger);
-  const appName = config.get<string>("app.name");
+  const appName = config.get<string>("app.name")!;
 
   // Swagger setup
   const swaggerConfig = new DocumentBuilder()
@@ -50,11 +55,9 @@ async function bootstrap() {
 
   if (config.get<boolean>("app.debug")) {
     app.getHttpAdapter().getInstance().set("json spaces", 2);
-  } else {
-    app.useLogger(logger);
   }
 
-  const port = config.get<string>("app.port");
+  const port = config.get<string>("app.port")!;
   await app.listen(port);
 }
 

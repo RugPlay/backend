@@ -1,22 +1,23 @@
 import { Injectable } from "@nestjs/common";
-import { KnexDao } from "@/database/knex/knex.dao";
+import { KyselyDao } from "@/database/kysely/kysely.dao";
 import { CreateMarketDto } from "../dtos/market/create-market.dto";
 import { UpdateMarketDto } from "../dtos/market/update-market.dto";
 import { MarketFiltersDto } from "../dtos/market/market-filters.dto";
 import { MarketDto } from "../dtos/market/market.dto";
 import type { MarketCategory } from "../types/market-category";
+import { sql } from "kysely";
 
 @Injectable()
-export class MarketDao extends KnexDao<MarketDao> {
-  protected readonly tableName = "markets";
+export class MarketDao extends KyselyDao<MarketDao> {
 
   /**
    * Insert a new market into the database
    */
   async createMarket(market: CreateMarketDto): Promise<string | null> {
     try {
-      const [result] = await this.knex(this.tableName)
-        .insert({
+      const result = await this.kysely
+        .insertInto('markets')
+        .values({
           symbol: market.symbol,
           name: market.name,
           category: market.category,
@@ -32,9 +33,10 @@ export class MarketDao extends KnexDao<MarketDao> {
           trading_start: market.tradingStart || null,
           trading_end: market.tradingEnd || null,
           timezone: market.timezone || "UTC",
-          metadata: market.metadata || null,
-        })
-        .returning("id");
+          metadata: market.metadata ? JSON.stringify(market.metadata) : null,
+        } as any)
+        .returning('id')
+        .executeTakeFirst();
 
       return result?.id || null;
     } catch (error) {
@@ -48,7 +50,11 @@ export class MarketDao extends KnexDao<MarketDao> {
    */
   async getMarketById(id: string): Promise<MarketDto | null> {
     try {
-      const [result] = await this.knex(this.tableName).where("id", id);
+      const result = await this.kysely
+        .selectFrom('markets')
+        .selectAll()
+        .where('id', '=', id)
+        .executeTakeFirst();
       return result ? this.mapRecordToDto(result) : null;
     } catch (error) {
       console.error("Error fetching market by ID:", error);
@@ -61,7 +67,11 @@ export class MarketDao extends KnexDao<MarketDao> {
    */
   async getMarketBySymbol(symbol: string): Promise<MarketDto | null> {
     try {
-      const [result] = await this.knex(this.tableName).where("symbol", symbol);
+      const result = await this.kysely
+        .selectFrom('markets')
+        .selectAll()
+        .where('symbol', '=', symbol)
+        .executeTakeFirst();
       return result ? this.mapRecordToDto(result) : null;
     } catch (error) {
       console.error("Error fetching market by symbol:", error);
@@ -74,29 +84,31 @@ export class MarketDao extends KnexDao<MarketDao> {
    */
   async getMarkets(filters?: MarketFiltersDto): Promise<MarketDto[]> {
     try {
-      let query = this.knex(this.tableName);
+      let query = this.kysely
+        .selectFrom('markets')
+        .selectAll();
 
       if (filters?.category) {
-        query = query.where("category", filters.category);
+        query = query.where('category', '=', filters.category);
       }
 
       if (filters?.baseCurrency) {
-        query = query.where("base_currency", filters.baseCurrency);
+        query = query.where('base_currency', '=', filters.baseCurrency);
       }
 
       if (filters?.quoteCurrency) {
-        query = query.where("quote_currency", filters.quoteCurrency);
+        query = query.where('quote_currency', '=', filters.quoteCurrency);
       }
 
       if (filters?.isActive !== undefined) {
-        query = query.where("is_active", filters.isActive);
+        query = query.where('is_active', '=', filters.isActive);
       }
 
       if (filters?.is24h !== undefined) {
-        query = query.where("is_24h", filters.is24h);
+        query = query.where('is_24h', '=', filters.is24h);
       }
 
-      const results = await query.orderBy("symbol", "asc");
+      const results = await query.orderBy('symbol', 'asc').execute();
       return results.map((record) => this.mapRecordToDto(record));
     } catch (error) {
       console.error("Error fetching markets:", error);
@@ -109,9 +121,12 @@ export class MarketDao extends KnexDao<MarketDao> {
    */
   async getMarketsByCategory(category: string): Promise<MarketDto[]> {
     try {
-      const results = await this.knex(this.tableName)
-        .where("category", category)
-        .orderBy("symbol", "asc");
+      const results = await this.kysely
+        .selectFrom('markets')
+        .selectAll()
+        .where('category', '=', category)
+        .orderBy('symbol', 'asc')
+        .execute();
       return results.map((record) => this.mapRecordToDto(record));
     } catch (error) {
       console.error("Error fetching markets by category:", error);
@@ -124,9 +139,12 @@ export class MarketDao extends KnexDao<MarketDao> {
    */
   async getActiveMarkets(): Promise<MarketDto[]> {
     try {
-      const results = await this.knex(this.tableName)
-        .where("is_active", true)
-        .orderBy("symbol", "asc");
+      const results = await this.kysely
+        .selectFrom('markets')
+        .selectAll()
+        .where('is_active', '=', true)
+        .orderBy('symbol', 'asc')
+        .execute();
       return results.map((record) => this.mapRecordToDto(record));
     } catch (error) {
       console.error("Error fetching active markets:", error);
@@ -162,15 +180,17 @@ export class MarketDao extends KnexDao<MarketDao> {
       if (market.tradingEnd !== undefined)
         updateData.trading_end = market.tradingEnd;
       if (market.timezone !== undefined) updateData.timezone = market.timezone;
-      if (market.metadata !== undefined) updateData.metadata = market.metadata;
+      if (market.metadata !== undefined) updateData.metadata = market.metadata ? JSON.stringify(market.metadata) : null;
 
-      updateData.updated_at = this.knex.fn.now();
+      updateData.updated_at = sql`CURRENT_TIMESTAMP`;
 
-      const updatedCount = await this.knex(this.tableName)
-        .where("id", id)
-        .update(updateData);
+      const result = await this.kysely
+        .updateTable('markets')
+        .set(updateData)
+        .where('id', '=', id)
+        .executeTakeFirst();
 
-      return updatedCount > 0;
+      return result.numUpdatedRows > 0;
     } catch (error) {
       console.error("Error updating market:", error);
       return false;
@@ -182,12 +202,28 @@ export class MarketDao extends KnexDao<MarketDao> {
    */
   async deleteMarket(id: string): Promise<boolean> {
     try {
-      const deletedCount = await this.knex(this.tableName)
-        .where("id", id)
-        .delete();
-      return deletedCount > 0;
+      const result = await this.kysely
+        .deleteFrom('markets')
+        .where('id', '=', id)
+        .executeTakeFirst();
+      return result.numDeletedRows > 0;
     } catch (error) {
       console.error("Error deleting market:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Delete all markets (for testing)
+   */
+  async deleteAllMarkets(): Promise<boolean> {
+    try {
+      await this.kysely
+        .deleteFrom('markets')
+        .execute();
+      return true;
+    } catch (error) {
+      console.error("Error deleting all markets:", error);
       return false;
     }
   }
@@ -197,10 +233,12 @@ export class MarketDao extends KnexDao<MarketDao> {
    */
   async getCategories(): Promise<string[]> {
     try {
-      const results = await this.knex(this.tableName)
-        .distinct("category")
-        .pluck("category");
-      return results;
+      const results = await this.kysely
+        .selectFrom('markets')
+        .select('category')
+        .distinct()
+        .execute();
+      return results.map(row => row.category);
     } catch (error) {
       console.error("Error fetching categories:", error);
       return [];

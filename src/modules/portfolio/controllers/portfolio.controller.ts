@@ -2,7 +2,6 @@ import {
   Controller,
   Get,
   Param,
-  UseGuards,
   Request,
   HttpStatus,
 } from "@nestjs/common";
@@ -13,7 +12,6 @@ import {
   ApiBearerAuth,
   ApiParam,
 } from "@nestjs/swagger";
-import { AuthGuard } from "@thallesp/nestjs-better-auth";
 import { PortfolioService } from "../services/portfolio.service";
 import { PortfolioDto } from "../dtos/portfolio.dto";
 import { HoldingDto } from "../dtos/holding.dto";
@@ -21,7 +19,6 @@ import { BalanceDto } from "../dtos/balance.dto";
 
 @ApiTags("portfolio")
 @Controller("portfolio")
-@UseGuards(AuthGuard)
 @ApiBearerAuth()
 export class PortfolioController {
   constructor(private readonly portfolioService: PortfolioService) {}

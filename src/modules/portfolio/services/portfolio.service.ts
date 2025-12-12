@@ -65,6 +65,7 @@ export class PortfolioService {
       id: portfolioData.id!,
       userId: portfolioData.userId!,
       balance: portfolioData.balance!,
+      type: portfolioData.type || "real",
       holdings,
       createdAt: portfolioData.createdAt!,
       updatedAt: portfolioData.updatedAt!,
@@ -200,7 +201,7 @@ export class PortfolioService {
       return this.getPortfolio(userId);
     }
 
-    const createDto: CreatePortfolioDto = { balance: initialBalance };
+    const createDto: CreatePortfolioDto = { balance: initialBalance, type: "real" };
     return this.createPortfolio(userId, createDto);
   }
 

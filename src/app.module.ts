@@ -1,21 +1,15 @@
 import {
-  MiddlewareConsumer,
   Module,
-  NestModule,
   ClassSerializerInterceptor,
 } from "@nestjs/common";
-import { ConfigModule, ConfigService } from "@nestjs/config";
-import * as path from "path";
-import { KnexModule } from "nest-knexjs";
+import { ConfigModule, ConfigService, registerAs } from "@nestjs/config";
 import appConfig from "@/config/app.config";
 import sqlConfig from "@/config/sql.config";
 import redisConfig from "@/config/redis.config";
-import { LoggerModule } from "nestjs-pino";
 import { ProfileModule } from "@/modules/profiles/profile.module";
 import { SocketModule } from "@/modules/socket/socket.module";
 import { ExchangeModule } from "@/modules/exchange/exchange.module";
 import { PortfolioModule } from "@/modules/portfolio/portfolio.module";
-import helmet from "helmet";
 import { AllExceptionFilter } from "@/filters/all-exception.filter";
 import cookieConfig from "@/config/cookie.config";
 import { CacheModule } from "@nestjs/cache-manager";
@@ -28,9 +22,10 @@ import Keyv from "keyv";
 import { RedisModule } from "@/redis/redis.module";
 import Redis from "ioredis";
 import { REDIS_CLIENT } from "@/redis/constants/redis.constants";
-import { auth } from "./auth";
-import { AuthModule } from "@thallesp/nestjs-better-auth";
-import frontendConfig from "@/config/frontend.config";
+import { DATABASE_POOL } from "./postgres/constants/postgres.constants";
+import { KyselyModule } from "nestjs-kysely";
+import { PostgresModule } from "./postgres/postgres.module";
+import { PostgresDialect } from "kysely";
 
 @Module({
   imports: [
@@ -38,20 +33,18 @@ import frontendConfig from "@/config/frontend.config";
       cache: true,
       isGlobal: true,
       load: [
-        appConfig,
-        cookieConfig,
-        sqlConfig,
-        redisConfig,
-        authConfig,
-        frontendConfig,
+        registerAs('app', () => appConfig),
+        registerAs('cookie', () => cookieConfig),
+        registerAs('sql', () => sqlConfig), 
+        registerAs('redis', () => redisConfig),
+        registerAs('auth', () => authConfig),
       ],
     }),
-    LoggerModule.forRoot(),
     EventEmitterModule.forRoot(),
     RedisModule,
     CacheModule.registerAsync({
       imports: [ConfigModule],
-      useFactory: async (config: ConfigService, redisClient: Redis) => {
+      useFactory: async (redisClient: Redis) => {
         return {
           stores: [
             new Keyv({
@@ -60,39 +53,20 @@ import frontendConfig from "@/config/frontend.config";
           ],
         };
       },
-      inject: [ConfigService, REDIS_CLIENT],
+      inject: [REDIS_CLIENT],
       isGlobal: true,
     }),
-    KnexModule.forRootAsync({
-      useFactory: (config: ConfigService) => ({
-        config: {
-          client: config.get<string>("sql.driver"),
-          connection: {
-            host: config.get<string>("sql.host"),
-            port: config.get<number>("sql.port"),
-            user: config.get<string>("sql.username"),
-            password: config.get<string>("sql.password"),
-            database: config.get<string>("sql.name"),
-          },
-          migrations: {
-            directory: path.join(
-              __dirname,
-              "src",
-              "database",
-              "knex",
-              "migrations",
-            ),
-            extension: "ts",
-          },
-          seeds: {
-            directory: path.join(__dirname, "src", "database", "knex", "seeds"),
-            extension: "ts",
-          },
-        },
-      }),
-      inject: [ConfigService],
-    }),
+    PostgresModule,
     ScheduleModule.forRoot(),
+    KyselyModule.forRootAsync({
+      imports: [PostgresModule],
+      inject: [DATABASE_POOL],
+      useFactory: (postgresPool: any) => ({
+        dialect: new PostgresDialect({
+          pool: postgresPool,
+        }),
+      }),
+    }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => ({
@@ -100,7 +74,6 @@ import frontendConfig from "@/config/frontend.config";
       }),
       inject: [ConfigService],
     }),
-    AuthModule.forRoot(auth),
     ProfileModule,
     SocketModule,
     ExchangeModule,
@@ -117,8 +90,4 @@ import frontendConfig from "@/config/frontend.config";
     },
   ],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer): any {
-    consumer.apply(helmet()).forRoutes("*");
-  }
-}
+export class AppModule {}

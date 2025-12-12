@@ -7,11 +7,9 @@ import {
   Body,
   Param,
   HttpCode,
-  SerializeOptions,
-  UseGuards,
+  SerializeOptions
 } from "@nestjs/common";
 import { ApiTags, ApiOperation, ApiResponse } from "@nestjs/swagger";
-import { AuthGuard, Session, UserSession } from "@thallesp/nestjs-better-auth";
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { ProfileService } from "@/modules/profiles/services/profile.service";
 import { ProfileDto } from "@/modules/profiles/dtos/profile.dto";
@@ -24,9 +22,8 @@ export class ProfileController {
   constructor(private readonly ProfileService: ProfileService) {}
 
   @Get()
-  @UseGuards(AuthGuard)
-  async getProfiles(@Session() session: UserSession): Promise<any> {
-    return { ...session };
+  async getProfiles(req: any): Promise<any> {
+    return { ...req.body };
   }
 
   @Post()
