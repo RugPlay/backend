@@ -12,5 +12,6 @@
   "maxWorkers": 1,
   "testTimeout": 30000,
   "forceExit": true,
-  "globalTeardown": "<rootDir>/global-teardown.ts"
+  "globalTeardown": "<rootDir>/global-teardown.ts",
+  "setupFilesAfterEnv": ["dotenv/config"]
 }
