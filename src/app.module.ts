@@ -6,7 +6,6 @@ import { ConfigModule, ConfigService, registerAs } from "@nestjs/config";
 import appConfig from "@/config/app.config";
 import sqlConfig from "@/config/sql.config";
 import redisConfig from "@/config/redis.config";
-import { ProfileModule } from "@/modules/profiles/profile.module";
 import { SocketModule } from "@/modules/socket/socket.module";
 import { ExchangeModule } from "@/modules/exchange/exchange.module";
 import { PortfolioModule } from "@/modules/portfolio/portfolio.module";
@@ -74,7 +73,6 @@ import { PostgresDialect } from "kysely";
       }),
       inject: [ConfigService],
     }),
-    ProfileModule,
     SocketModule,
     ExchangeModule,
     PortfolioModule,
