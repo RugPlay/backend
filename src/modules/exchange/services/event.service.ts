@@ -59,7 +59,7 @@ export class EventService {
 
     this.logger.debug(
       `Published order match event: ${match.takerOrderId} <-> ${match.makerOrderId} ` +
-        `(${match.matchedQuantity} @ ${match.matchedPrice}, taker: ${match.takerSide})`,
+        `(${match.matchedQuantity} @ ${match.matchedPrice})`,
     );
   }
 

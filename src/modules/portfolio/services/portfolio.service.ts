@@ -178,6 +178,7 @@ export class PortfolioService {
     return {
       id: holdingData.id!,
       portfolioId: holdingData.portfolioId!,
+      userId: holdingData.userId!,
       marketId: holdingData.marketId!,
       quantity: holdingData.quantity!,
       averageCostBasis: holdingData.averageCostBasis,

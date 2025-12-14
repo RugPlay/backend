@@ -5,6 +5,7 @@ import {
   IsPositive,
   IsEnum,
   IsDateString,
+  IsUUID,
 } from "class-validator";
 import { TradeType } from "../../types/trade-type";
 
@@ -41,14 +42,6 @@ export class BatchCreateTradeDto {
   readonly makerOrderId: string;
 
   @ApiProperty({
-    description: "Side of the taker order",
-    enum: ["bid", "ask"],
-    example: "bid",
-  })
-  @IsEnum(["bid", "ask"])
-  readonly takerSide: "bid" | "ask";
-
-  @ApiProperty({
     description: "Type of trade (paper or real)",
     enum: ["paper", "real"],
     example: "real",
@@ -80,4 +73,18 @@ export class BatchCreateTradeDto {
   })
   @IsDateString()
   readonly timestamp: Date;
+
+  @ApiProperty({
+    description: "Portfolio ID of the taker",
+    example: "123e4567-e89b-12d3-a456-426614174000",
+  })
+  @IsUUID()
+  readonly takerPortfolioId: string;
+
+  @ApiProperty({
+    description: "Portfolio ID of the maker",
+    example: "456e7890-e89b-12d3-a456-426614174001",
+  })
+  @IsUUID()
+  readonly makerPortfolioId: string;
 }

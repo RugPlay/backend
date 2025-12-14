@@ -1,15 +1,27 @@
 import {
   Controller,
   Get,
+  Post,
   Delete,
   Param,
+  Body,
   HttpException,
   HttpStatus,
 } from "@nestjs/common";
-import { ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
+import {
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+  ApiParam,
+  ApiBody,
+} from "@nestjs/swagger";
 import { OrderService } from "../services/order.service";
 import { OrderBookDto } from "../dtos/order/order-book.dto";
 import { OrderBookEntryDto } from "../dtos/order/order-book-entry.dto";
+import { OrderMatchingResultDto } from "../dtos/order/order-matching-result.dto";
+import { PlaceOrderDto } from "../dtos/order/place-order.dto";
+import { MarketService } from "../services/market.service";
+import { v4 as uuidv4 } from "uuid";
 import {
   MarketNotFoundException,
   OrderOperationFailedException,
@@ -19,7 +31,10 @@ import {
 @ApiTags("Order")
 @Controller("order")
 export class OrderController {
-  constructor(private readonly orderService: OrderService) {}
+  constructor(
+    private readonly orderService: OrderService,
+    private readonly marketService: MarketService,
+  ) {}
 
   @Get("markets")
   @ApiOperation({ summary: "Get all market IDs" })
@@ -162,20 +177,194 @@ export class OrderController {
     return depth;
   }
 
-  @Delete(":marketId/clear")
-  @ApiOperation({ summary: "Clear order book for a market" })
+  @Post(":marketId/place-order")
+  @ApiOperation({
+    summary: "Place an order with automatic matching",
+    description:
+      "Places an order and attempts to match it against existing orders in the order book",
+  })
+  @ApiParam({
+    name: "marketId",
+    description: "The unique identifier of the market",
+    example: "123e4567-e89b-12d3-a456-426614174000",
+  })
+  @ApiBody({
+    description: "Order details to place",
+    type: PlaceOrderDto,
+  })
   @ApiResponse({
-    status: 200,
-    description: "Order book cleared successfully",
+    status: 201,
+    description: "Order placed and matching completed successfully",
+    type: OrderMatchingResultDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: "Invalid order parameters",
   })
   @ApiResponse({
     status: 404,
     description: "Market not found",
   })
-  async clearOrderBook(
+  async placeOrderWithMatching(
     @Param("marketId") marketId: string,
-  ): Promise<{ message: string }> {
-    await this.orderService.clearOrderBook(marketId);
-    return { message: `Order book cleared for market ${marketId}` };
+    @Body() orderRequest: PlaceOrderDto,
+  ): Promise<OrderMatchingResultDto> {
+    try {
+      // Check if market exists using MarketService for more reliable check
+      const market = await this.marketService.getMarketById(marketId);
+      if (!market) {
+        throw new MarketNotFoundException(marketId);
+      }
+      
+      // Ensure order book is initialized for this market
+      await this.orderService.initializeOrderBook(marketId);
+
+      // Create order object (validation is handled by ValidationPipe via PlaceOrderDto)
+      const order = {
+        marketId,
+        orderId: uuidv4(),
+        side: orderRequest.side,
+        price: orderRequest.price,
+        quantity: orderRequest.quantity,
+        portfolioId: orderRequest.portfolioId,
+      };
+
+      // Place order with matching
+      // Add missing portfolioId to order object for type compatibility
+      const result = await this.orderService.addOrderWithMatching(
+        marketId,
+        order,
+      );
+
+      // Convert to DTO format
+      return {
+        matches: result.matches.map((match) => ({
+          marketId: match.marketId,
+          takerOrderId: match.takerOrderId,
+          makerOrderId: match.makerOrderId,
+          matchedQuantity: match.matchedQuantity,
+          matchedPrice: match.matchedPrice,
+          timestamp: match.timestamp,
+          takerRemainingQuantity: match.takerRemainingQuantity,
+          makerRemainingQuantity: match.makerRemainingQuantity,
+        })),
+        remainingOrder: result.remainingOrder
+          ? {
+              marketId: result.remainingOrder.marketId,
+              price: result.remainingOrder.price,
+              quantity: result.remainingOrder.quantity,
+              portfolioId: result.remainingOrder.portfolioId,
+              timestamp: result.remainingOrder.timestamp,
+              orderId: result.remainingOrder.orderId,
+              side: result.remainingOrder.side,
+            }
+          : null,
+        updatedOrders: result.updatedOrders,
+        completedOrderIds: result.completedOrderIds,
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new OrderOperationFailedException(
+        "Internal server error during order placement",
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
   }
+
+  @Delete(":marketId/:orderId")
+  @ApiOperation({
+    summary: "Cancel an order",
+    description: "Cancels an existing order in the market",
+  })
+  @ApiParam({
+    name: "marketId",
+    description: "The unique identifier of the market",
+    example: "123e4567-e89b-12d3-a456-426614174000",
+  })
+  @ApiParam({
+    name: "orderId",
+    description: "The unique identifier of the order to cancel",
+    example: "order-123e4567-e89b-12d3-a456-426614174000",
+  })
+  @ApiBody({
+    description: "Order cancellation details",
+    schema: {
+      type: "object",
+      properties: {
+        side: {
+          type: "string",
+          enum: ["bid", "ask"],
+          description: "Order side (required for efficient cancellation)",
+          example: "bid",
+        },
+      },
+      required: ["side"],
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Order cancelled successfully",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean" },
+        message: { type: "string" },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: "Invalid request or order not found",
+  })
+  @ApiResponse({
+    status: 404,
+    description: "Market not found",
+  })
+  async cancelOrder(
+    @Param("marketId") marketId: string,
+    @Param("orderId") orderId: string,
+    @Body() body: { side: "bid" | "ask" },
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      // Validate input
+      if (!body.side) {
+        throw new OrderOperationFailedException("Missing required field: side");
+      }
+
+      // Check if market exists using MarketService for more reliable check
+      const market = await this.marketService.getMarketById(marketId);
+      if (!market) {
+        throw new MarketNotFoundException(marketId);
+      }
+
+      // Cancel the order
+      const success = await this.orderService.removeOrder(
+        marketId,
+        orderId,
+        body.side,
+      );
+
+      if (success) {
+        return {
+          success: true,
+          message: "Order cancelled successfully",
+        };
+      } else {
+        throw new OrderOperationFailedException(
+          "Order not found or could not be cancelled",
+        );
+      }
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new OrderOperationFailedException(
+        "Internal server error during order cancellation",
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
 }

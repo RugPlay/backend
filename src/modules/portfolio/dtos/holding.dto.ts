@@ -14,6 +14,12 @@ export class HoldingDto {
   portfolioId: string;
 
   @ApiProperty({
+    description: "The user ID that owns this holding",
+    example: "user_123e4567-e89b-12d3-a456-426614174000",
+  })
+  userId: string;
+
+  @ApiProperty({
     description: "The market ID of the asset",
     example: "market_123e4567-e89b-12d3-a456-426614174000",
   })

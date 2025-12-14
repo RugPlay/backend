@@ -21,13 +21,6 @@ export class MatchResultDto {
   makerOrderId: string;
 
   @ApiProperty({
-    description: "The side of the taker order (bid for buy, ask for sell)",
-    example: "bid",
-    enum: ["bid", "ask"],
-  })
-  takerSide: "bid" | "ask";
-
-  @ApiProperty({
     description: "The quantity that was matched between the orders",
     example: 1.5,
   })

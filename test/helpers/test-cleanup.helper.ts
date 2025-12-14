@@ -2,39 +2,41 @@ import { INestApplication } from '@nestjs/common';
 import { OrderService } from '../../src/modules/exchange/services/order.service';
 import { MarketService } from '../../src/modules/exchange/services/market.service';
 import { PortfolioService } from '../../src/modules/portfolio/services/portfolio.service';
-import { TradeDao } from '../../src/modules/exchange/daos/trade.dao';
-import { OrderDao } from '../../src/modules/exchange/daos/order.dao';
 import { HoldingDao } from '../../src/modules/portfolio/daos/holding.dao';
 import { PortfolioDao } from '../../src/modules/portfolio/daos/portfolio.dao';
-import { MarketDao } from '../../src/modules/exchange/daos/market.dao';
+import { Kysely, sql } from 'kysely';
+import { DB } from '../../src/database/types/db';
 import { REDIS_CLIENT } from '../../src/redis/constants/redis.constants';
-import { DATABASE_POOL } from '../../src/postgres/constants/postgres.constants';
 import Redis from 'ioredis';
-import { Pool } from 'pg';
 
 export class TestCleanupHelper {
   /**
    * Clean up all test data from database and Redis
+   * Uses Kysely directly to truncate tables (test-only operation)
    */
   static async cleanupTestData(app: INestApplication): Promise<void> {
     const orderService = app.get(OrderService);
-    const tradeDao = app.get(TradeDao);
-    const orderDao = app.get(OrderDao);
+    // Get Kysely instance from any DAO (they all have it)
     const holdingDao = app.get(HoldingDao);
-    const portfolioDao = app.get(PortfolioDao);
-    const marketDao = app.get(MarketDao);
+    const kysely = (holdingDao as any).kysely as Kysely<DB>;
 
     try {
       // Clear Redis data
       await orderService.clearAllRedisData();
 
-      // Clear database tables using DAOs (in correct order respecting foreign keys)
-      // Delete in order: trades -> orders -> holdings -> portfolios -> markets
-      await tradeDao.deleteAllTrades();
-      await orderDao.deleteAllOrders();
-      await holdingDao.deleteAllHoldings();
-      await portfolioDao.deleteAllPortfolios();
-      await marketDao.deleteAllMarkets();
+      // Delete database tables using Kysely directly (test-only operation)
+      // Order matters due to foreign key constraints
+      // Disable foreign key checks temporarily for deletion
+      await sql`SET session_replication_role = replica`.execute(kysely);
+      
+      await kysely.deleteFrom('trades').execute();
+      await kysely.deleteFrom('orders').execute();
+      await kysely.deleteFrom('holdings').execute();
+      await kysely.deleteFrom('portfolios').execute();
+      await kysely.deleteFrom('markets').execute();
+      
+      // Re-enable foreign key checks
+      await sql`SET session_replication_role = DEFAULT`.execute(kysely);
     } catch (error) {
       console.error('Error during test cleanup:', error);
     }

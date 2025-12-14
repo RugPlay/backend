@@ -432,19 +432,21 @@ export class OrderService implements OnModuleInit {
         continue;
       }
 
-      // Get or create holdings for both taker and maker
+      // Get user IDs from portfolios for filtering and holding creation
+      const takerPortfolio = await this.portfolioDao.getPortfolioById(order.portfolioId);
+      const makerPortfolio = await this.portfolioDao.getPortfolioById(match.matchedPortfolioId);
+
+      // Get or create holdings for both taker and maker (pass userId for efficiency)
       const takerHoldingId = await this.holdingDao.getOrCreateHoldingId(
         order.portfolioId,
         marketId,
+        takerPortfolio?.userId,
       );
       const makerHoldingId = await this.holdingDao.getOrCreateHoldingId(
         match.matchedPortfolioId,
         marketId,
+        makerPortfolio?.userId,
       );
-
-      // Get user IDs from portfolios for filtering
-      const takerPortfolio = await this.portfolioDao.getPortfolioById(order.portfolioId);
-      const makerPortfolio = await this.portfolioDao.getPortfolioById(match.matchedPortfolioId);
 
       // Update holdings/balances based on trade
       const tradeValue = match.price * match.quantity;
@@ -515,7 +517,6 @@ export class OrderService implements OnModuleInit {
         marketId,
         takerOrderId: order.orderId,
         makerOrderId: match.matchedOrderId,
-        takerSide: order.side,
         price: match.price,
         quantity: match.quantity,
         type: "real" as TradeType,
@@ -524,6 +525,8 @@ export class OrderService implements OnModuleInit {
         makerHoldingId: makerHoldingId || undefined,
         takerUserId: takerPortfolio?.userId,
         makerUserId: makerPortfolio?.userId,
+        takerPortfolioId: order.portfolioId,
+        makerPortfolioId: match.matchedPortfolioId,
       };
 
       const tradeResult = await this.tradeDao.createTrade(tradeExecution);
@@ -537,7 +540,6 @@ export class OrderService implements OnModuleInit {
         marketId,
         takerOrderId: order.orderId,
         makerOrderId: match.matchedOrderId,
-        takerSide: order.side,
         matchedQuantity: match.quantity,
         matchedPrice: match.price,
         timestamp: new Date(),
@@ -951,7 +953,6 @@ export class OrderService implements OnModuleInit {
         marketId: trade.marketId,
         takerOrderId: trade.takerOrderId,
         makerOrderId: trade.makerOrderId,
-        takerSide: trade.takerSide,
         type: trade.type,
         quantity: trade.quantity,
         price: trade.price,
@@ -959,6 +960,8 @@ export class OrderService implements OnModuleInit {
         createdAt: trade.createdAt, // Also include createdAt for backward compatibility
         takerUserId: trade.takerUserId,
         makerUserId: trade.makerUserId,
+        takerPortfolioId: trade.takerPortfolioId,
+        makerPortfolioId: trade.makerPortfolioId,
       }));
     } catch (error) {
       this.logger.error(`Error getting recent trades for market ${marketId}:`, error);

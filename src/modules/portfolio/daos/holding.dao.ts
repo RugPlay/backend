@@ -5,6 +5,24 @@ import { sql } from "kysely";
 
 @Injectable()
 export class HoldingDao extends KyselyDao<HoldingDao> {
+  /**
+   * Get user_id from portfolio_id
+   */
+  private async getUserIdFromPortfolioId(portfolioId: string, trx?: any): Promise<string | null> {
+    try {
+      const db = trx || this.kysely;
+      const portfolio = await db
+        .selectFrom('portfolios')
+        .select('user_id')
+        .where('id', '=', portfolioId)
+        .executeTakeFirst();
+      
+      return portfolio?.user_id || null;
+    } catch (error) {
+      console.error("Error getting user_id from portfolio_id:", error);
+      return null;
+    }
+  }
 
   /**
    * Get all holdings for a portfolio
@@ -38,6 +56,7 @@ export class HoldingDao extends KyselyDao<HoldingDao> {
         .select([
           'holdings.id',
           'holdings.portfolio_id',
+          'holdings.user_id',
           'holdings.market_id',
           'holdings.quantity',
           'holdings.average_cost_basis',
@@ -95,6 +114,7 @@ export class HoldingDao extends KyselyDao<HoldingDao> {
   async getOrCreateHoldingId(
     portfolioId: string,
     marketId: string,
+    userId?: string,
     trx?: any,
   ): Promise<string | null> {
     try {
@@ -112,11 +132,23 @@ export class HoldingDao extends KyselyDao<HoldingDao> {
         return existing.id;
       }
 
+      // Get userId if not provided
+      let finalUserId: string | undefined = userId;
+      if (!finalUserId) {
+        const fetchedUserId = await this.getUserIdFromPortfolioId(portfolioId, trx);
+        if (!fetchedUserId) {
+          console.error("Error: Could not get user_id for portfolio", portfolioId);
+          return null;
+        }
+        finalUserId = fetchedUserId;
+      }
+
       // Create new holding if it doesn't exist
       const result = await db
         .insertInto('holdings')
         .values({
           portfolio_id: portfolioId,
+          user_id: finalUserId,
           market_id: marketId,
           quantity: '0',
           average_cost_basis: '0',
@@ -139,12 +171,25 @@ export class HoldingDao extends KyselyDao<HoldingDao> {
     portfolioId: string,
     marketId: string,
     quantity: number,
+    userId?: string,
   ): Promise<boolean> {
     try {
+      // Get userId if not provided
+      let finalUserId = userId;
+      if (!finalUserId) {
+        const fetchedUserId = await this.getUserIdFromPortfolioId(portfolioId);
+        if (!fetchedUserId) {
+          console.error("Error: Could not get user_id for portfolio", portfolioId);
+          return false;
+        }
+        finalUserId = fetchedUserId;
+      }
+
       await this.kysely
         .insertInto('holdings')
         .values({
           portfolio_id: portfolioId,
+          user_id: finalUserId,
           market_id: marketId,
           quantity: quantity.toString(),
           average_cost_basis: '0',
@@ -172,12 +217,25 @@ export class HoldingDao extends KyselyDao<HoldingDao> {
     portfolioId: string,
     marketId: string,
     quantity: number,
+    userId?: string,
   ): Promise<boolean> {
     try {
+      // Get userId if not provided
+      let finalUserId = userId;
+      if (!finalUserId) {
+        const fetchedUserId = await this.getUserIdFromPortfolioId(portfolioId);
+        if (!fetchedUserId) {
+          console.error("Error: Could not get user_id for portfolio", portfolioId);
+          return false;
+        }
+        finalUserId = fetchedUserId;
+      }
+
       await this.kysely
         .insertInto('holdings')
         .values({
           portfolio_id: portfolioId,
+          user_id: finalUserId,
           market_id: marketId,
           quantity: quantity.toString(),
           average_cost_basis: '0',
@@ -238,10 +296,18 @@ export class HoldingDao extends KyselyDao<HoldingDao> {
 
         // If no existing holding, create a new one
         if (Number(result.numUpdatedRows) === 0) {
+          // Get userId from portfolio
+          const fetchedUserId = await this.getUserIdFromPortfolioId(portfolioId, trx);
+          if (!fetchedUserId) {
+            console.error("Error: Could not get user_id for portfolio", portfolioId);
+            return false;
+          }
+
           await db
             .insertInto('holdings')
             .values({
               portfolio_id: portfolioId,
+              user_id: fetchedUserId,
               market_id: marketId,
               quantity: deltaQuantity.toString(),
               average_cost_basis: '0',
@@ -336,20 +402,6 @@ export class HoldingDao extends KyselyDao<HoldingDao> {
     }
   }
 
-  /**
-   * Delete all holdings (for testing)
-   */
-  async deleteAllHoldings(): Promise<boolean> {
-    try {
-      await this.kysely
-        .deleteFrom('holdings')
-        .execute();
-      return true;
-    } catch (error) {
-      console.error("Error deleting all holdings:", error);
-      return false;
-    }
-  }
 
   /**
    * Map database record to HoldingDto
@@ -358,6 +410,7 @@ export class HoldingDao extends KyselyDao<HoldingDao> {
     const dto = new HoldingDto();
     dto.id = record.id;
     dto.portfolioId = record.portfolio_id;
+    dto.userId = record.user_id;
     dto.marketId = record.market_id;
     dto.quantity = parseFloat(record.quantity);
     dto.averageCostBasis = record.average_cost_basis ? parseFloat(record.average_cost_basis) : undefined;
@@ -374,6 +427,7 @@ export class HoldingDao extends KyselyDao<HoldingDao> {
     const dto = new HoldingDto();
     dto.id = record.id;
     dto.portfolioId = record.portfolio_id;
+    dto.userId = record.user_id;
     dto.marketId = record.market_id;
     dto.marketSymbol = record.market_symbol;
     dto.marketName = record.market_name;

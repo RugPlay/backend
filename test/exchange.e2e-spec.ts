@@ -152,7 +152,7 @@ describe("Exchange (e2e)", () => {
       };
 
       const response = await request(app.getHttpServer())
-        .post(`/markets/${testMarketId}/place-order`)
+        .post(`/order/${testMarketId}/place-order`)
         .send(orderData)
         .expect(201);
 
@@ -182,7 +182,7 @@ describe("Exchange (e2e)", () => {
       };
 
       const response = await request(app.getHttpServer())
-        .post(`/markets/${testMarketId}/place-order`)
+        .post(`/order/${testMarketId}/place-order`)
         .send(orderData)
         .expect(201);
 
@@ -262,7 +262,7 @@ describe("Exchange (e2e)", () => {
       // Place all buy orders
       for (const order of buyOrders) {
         await request(app.getHttpServer())
-          .post(`/markets/${testMarketId}/place-order`)
+          .post(`/order/${testMarketId}/place-order`)
           .send(order)
           .expect(201);
       }
@@ -270,7 +270,7 @@ describe("Exchange (e2e)", () => {
       // Place all sell orders
       for (const order of sellOrders) {
         await request(app.getHttpServer())
-          .post(`/markets/${testMarketId}/place-order`)
+          .post(`/order/${testMarketId}/place-order`)
           .send(order)
           .expect(201);
       }
@@ -302,7 +302,7 @@ describe("Exchange (e2e)", () => {
       };
 
       const response = await request(app.getHttpServer())
-        .post(`/markets/${testMarketId}/place-order`)
+        .post(`/order/${testMarketId}/place-order`)
         .send(matchingOrder)
         .expect(201);
 
@@ -310,7 +310,6 @@ describe("Exchange (e2e)", () => {
       expect(response.body.matches).toHaveLength(1);
       expect(response.body.matches[0]).toMatchObject({
         marketId: testMarketId,
-        takerSide: "bid",
         matchedQuantity: 1.0,
         matchedPrice: 51000,
       });
@@ -349,7 +348,7 @@ describe("Exchange (e2e)", () => {
       };
 
       const response = await request(app.getHttpServer())
-        .post(`/markets/${testMarketId}/place-order`)
+        .post(`/order/${testMarketId}/place-order`)
         .send(completeOrder)
         .expect(201);
 
@@ -426,7 +425,7 @@ describe("Exchange (e2e)", () => {
       };
 
       await request(app.getHttpServer())
-        .post(`/markets/${testMarketId}/place-order`)
+        .post(`/order/${testMarketId}/place-order`)
         .send(invalidOrder)
         .expect(400);
     });
@@ -441,7 +440,7 @@ describe("Exchange (e2e)", () => {
       };
 
       await request(app.getHttpServer())
-        .post(`/markets/${fakeMarketId}/place-order`)
+        .post(`/order/${fakeMarketId}/place-order`)
         .send(validOrder)
         .expect(404);
     });

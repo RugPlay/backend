@@ -213,20 +213,6 @@ export class MarketDao extends KyselyDao<MarketDao> {
     }
   }
 
-  /**
-   * Delete all markets (for testing)
-   */
-  async deleteAllMarkets(): Promise<boolean> {
-    try {
-      await this.kysely
-        .deleteFrom('markets')
-        .execute();
-      return true;
-    } catch (error) {
-      console.error("Error deleting all markets:", error);
-      return false;
-    }
-  }
 
   /**
    * Get all unique categories

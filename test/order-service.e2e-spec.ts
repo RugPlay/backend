@@ -178,7 +178,6 @@ describe("OrderService (e2e)", () => {
       expect(matchResult.matches).toHaveLength(1);
       expect(matchResult.matches[0]).toMatchObject({
         marketId: testMarketId,
-        takerSide: "bid",
         matchedQuantity: 1.0,
         matchedPrice: 50000,
       });

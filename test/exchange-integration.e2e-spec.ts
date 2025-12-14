@@ -9,6 +9,7 @@ import { PortfolioStateTracker } from "./helpers/portfolio-state-tracker.helper"
 import { PortfolioService } from "../src/modules/portfolio/services/portfolio.service";
 import { PortfolioDao } from "../src/modules/portfolio/daos/portfolio.dao";
 import { HoldingDao } from "../src/modules/portfolio/daos/holding.dao";
+import { OrderService } from "../src/modules/exchange/services/order.service";
 
 describe("Exchange Integration (e2e)", () => {
   let app: INestApplication;
@@ -21,13 +22,13 @@ describe("Exchange Integration (e2e)", () => {
   // Test helper functions
   const TestHelpers = {
     /**
-     * Clear the order book for a market
+     * Clear the order book for a market (test-only operation)
      */
     async clearOrderBook(marketId: string): Promise<void> {
       try {
-        await request(app.getHttpServer())
-          .delete(`/order/${marketId}/clear`)
-          .expect(200);
+        const orderService = moduleFixture.get<OrderService>(OrderService);
+        // Use the service method directly (test-only, not exposed via API)
+        await orderService.clearOrderBook(marketId);
       } catch (error) {
         // Ignore cleanup errors - market might not exist or already empty
         console.log("Order book clear warning (ignored):", error.message);
@@ -63,7 +64,7 @@ describe("Exchange Integration (e2e)", () => {
       order: { side: "bid" | "ask"; price: number; quantity: number; portfolioId: string }
     ) {
       return request(app.getHttpServer())
-        .post(`/markets/${marketId}/place-order`)
+        .post(`/order/${marketId}/place-order`)
         .send(order);
     },
 
@@ -75,7 +76,7 @@ describe("Exchange Integration (e2e)", () => {
       order: { side: "bid" | "ask"; price: number; quantity: number; portfolioId: string }
     ) {
       const response = await request(app.getHttpServer())
-        .post(`/markets/${marketId}/place-order`)
+        .post(`/order/${marketId}/place-order`)
         .send(order);
       return response;
     },
@@ -412,7 +413,6 @@ describe("Exchange Integration (e2e)", () => {
       expect(matchResponse.body.matches).toHaveLength(1);
       expect(matchResponse.body.matches[0]).toMatchObject({
         marketId: testMarketId,
-        takerSide: "bid",
         matchedQuantity: 1.0,
         matchedPrice: 51000,
       });

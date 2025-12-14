@@ -12,7 +12,6 @@ export class OrderMatchingResultDto {
         marketId: "123e4567-e89b-12d3-a456-426614174000",
         takerOrderId: "ord_123e4567-e89b-12d3-a456-426614174000",
         makerOrderId: "ord_456e7890-e89b-12d3-a456-426614174001",
-        takerSide: "bid",
         matchedQuantity: 1.5,
         matchedPrice: 50000.5,
         timestamp: "2024-03-20T12:00:00Z",

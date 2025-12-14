@@ -229,20 +229,6 @@ export class PortfolioDao extends KyselyDao<PortfolioDao> {
     }
   }
 
-  /**
-   * Delete all portfolios (for testing)
-   */
-  async deleteAllPortfolios(): Promise<boolean> {
-    try {
-      await this.kysely
-        .deleteFrom('portfolios')
-        .execute();
-      return true;
-    } catch (error) {
-      console.error("Error deleting all portfolios:", error);
-      return false;
-    }
-  }
 
   /**
    * Get all portfolios (for system-wide calculations)

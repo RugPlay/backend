@@ -336,20 +336,6 @@ export class OrderDao extends KyselyDao<OrderDao> {
     }
   }
 
-  /**
-   * Delete all orders (for testing)
-   */
-  async deleteAllOrders(): Promise<boolean> {
-    try {
-      await this.kysely
-        .deleteFrom('orders')
-        .execute();
-      return true;
-    } catch (error) {
-      console.error("Error deleting all orders:", error);
-      return false;
-    }
-  }
 
   /**
    * Map database record to OrderDto

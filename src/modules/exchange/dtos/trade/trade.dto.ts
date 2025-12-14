@@ -33,13 +33,6 @@ export class TradeDto {
   makerOrderId: string;
 
   @ApiProperty({
-    description: "The side of the taker order (bid for buy, ask for sell)",
-    example: "bid",
-    enum: ["bid", "ask"],
-  })
-  takerSide: "bid" | "ask";
-
-  @ApiProperty({
     description: "The type of trade (paper or real)",
     example: "real",
     enum: ["paper", "real"],
@@ -81,6 +74,18 @@ export class TradeDto {
     example: "user_456e7890-e89b-12d3-a456-426614174001",
   })
   makerUserId?: string;
+
+  @ApiProperty({
+    description: "The portfolio ID of the taker",
+    example: "123e4567-e89b-12d3-a456-426614174000",
+  })
+  takerPortfolioId: string;
+
+  @ApiProperty({
+    description: "The portfolio ID of the maker",
+    example: "456e7890-e89b-12d3-a456-426614174001",
+  })
+  makerPortfolioId: string;
 
   @ApiProperty({
     description: "The timestamp when the trade was created",
