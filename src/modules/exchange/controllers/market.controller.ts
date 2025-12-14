@@ -28,6 +28,13 @@ import { TradeExecutionDto } from "../dtos/trade/trade-execution.dto";
 import { v4 as uuidv4 } from "uuid";
 import { OrderService } from "../services/order.service";
 import { OrderMatchingResultDto } from "../dtos/order/order-matching-result.dto";
+import { PlaceOrderDto } from "../dtos/order/place-order.dto";
+import { CancelOrderDto } from "../dtos/order/cancel-order.dto";
+import {
+  MarketNotFoundException,
+  MarketOperationFailedException,
+  OrderOperationFailedException,
+} from "../exceptions";
 
 @ApiTags("markets")
 @Controller("markets")
@@ -53,10 +60,7 @@ export class MarketController {
   ): Promise<MarketDto> {
     const market = await this.marketService.createMarket(createMarketDto);
     if (!market) {
-      throw new HttpException(
-        "Failed to create market",
-        HttpStatus.BAD_REQUEST,
-      );
+      throw new MarketOperationFailedException("create");
     }
     
     // Initialize order book for the new market
@@ -166,11 +170,11 @@ export class MarketController {
     description: "Market not found",
   })
   async getMarketById(@Param("id") id: string): Promise<MarketDto> {
-    const market = await this.marketService.getMarketById(id);
-    if (!market) {
-      throw new HttpException("Market not found", HttpStatus.NOT_FOUND);
-    }
-    return market;
+      const market = await this.marketService.getMarketById(id);
+      if (!market) {
+        throw new MarketNotFoundException(id);
+      }
+      return market;
   }
 
   @Get("symbol/:symbol")
@@ -188,7 +192,7 @@ export class MarketController {
   async getMarketBySymbol(@Param("symbol") symbol: string): Promise<MarketDto> {
     const market = await this.marketService.getMarketBySymbol(symbol);
     if (!market) {
-      throw new HttpException("Market not found", HttpStatus.NOT_FOUND);
+      throw new MarketNotFoundException(symbol);
     }
     return market;
   }
@@ -215,10 +219,7 @@ export class MarketController {
   ): Promise<MarketDto> {
     const market = await this.marketService.updateMarket(id, updateMarketDto);
     if (!market) {
-      throw new HttpException(
-        "Failed to update market",
-        HttpStatus.BAD_REQUEST,
-      );
+      throw new MarketOperationFailedException("update");
     }
     return market;
   }
@@ -237,7 +238,7 @@ export class MarketController {
   async deleteMarket(@Param("id") id: string): Promise<{ message: string }> {
     const deleted = await this.marketService.deleteMarket(id);
     if (!deleted) {
-      throw new HttpException("Market not found", HttpStatus.NOT_FOUND);
+      throw new MarketNotFoundException(id);
     }
     return { message: "Market deleted successfully" };
   }
@@ -255,28 +256,7 @@ export class MarketController {
   })
   @ApiBody({
     description: "Order details to place",
-    schema: {
-      type: "object",
-      properties: {
-        side: {
-          type: "string",
-          enum: ["bid", "ask"],
-          description: "Order side (bid for buy, ask for sell)",
-          example: "bid",
-        },
-        price: {
-          type: "number",
-          description: "Order price",
-          example: 50000.5,
-        },
-        quantity: {
-          type: "number",
-          description: "Order quantity",
-          example: 1.5,
-        },
-      },
-      required: ["side", "price", "quantity"],
-    },
+    type: PlaceOrderDto,
   })
   @ApiResponse({
     status: 201,
@@ -293,50 +273,19 @@ export class MarketController {
   })
   async placeOrderWithMatching(
     @Param("marketId") marketId: string,
-    @Body()
-    orderRequest: {
-      side: "bid" | "ask";
-      price: number;
-      quantity: number;
-      portfolioId: string;
-    },
+    @Body() orderRequest: PlaceOrderDto,
   ): Promise<OrderMatchingResultDto> {
     try {
-      // Validate input
-      if (!orderRequest.side || !orderRequest.price || !orderRequest.quantity || !orderRequest.portfolioId) {
-        throw new HttpException(
-          "Missing required fields: side, price, quantity, portfolioId",
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      if (orderRequest.price <= 0 || orderRequest.quantity <= 0) {
-        throw new HttpException(
-          "Price and quantity must be positive numbers",
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      if (!["bid", "ask"].includes(orderRequest.side)) {
-        throw new HttpException(
-          "Side must be either 'bid' or 'ask'",
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
       // Check if market exists using MarketService for more reliable check
       const market = await this.marketService.getMarketById(marketId);
       if (!market) {
-        throw new HttpException(
-          `Market ${marketId} not found`,
-          HttpStatus.NOT_FOUND,
-        );
+        throw new MarketNotFoundException(marketId);
       }
       
       // Ensure order book is initialized for this market
       await this.orderService.initializeOrderBook(marketId);
 
-      // Create order object
+      // Create order object (validation is handled by ValidationPipe via PlaceOrderDto)
       const order = {
         marketId,
         orderId: uuidv4(),
@@ -384,7 +333,7 @@ export class MarketController {
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new HttpException(
+      throw new OrderOperationFailedException(
         "Internal server error during order placement",
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
@@ -425,10 +374,7 @@ export class MarketController {
       // Check if market exists using MarketService for more reliable check
       const market = await this.marketService.getMarketById(marketId);
       if (!market) {
-        throw new HttpException(
-          `Market ${marketId} not found`,
-          HttpStatus.NOT_FOUND,
-        );
+        throw new MarketNotFoundException(marketId);
       }
 
       const trades = await this.orderService.getRecentTrades(
@@ -445,7 +391,8 @@ export class MarketController {
         takerSide: trade.takerSide,
         quantity: trade.quantity,
         price: trade.price,
-        timestamp: trade.timestamp,
+        timestamp: trade.timestamp || trade.createdAt,
+        createdAt: trade.createdAt, // Include createdAt for backward compatibility
         takerUserId: trade.takerUserId,
         makerUserId: trade.makerUserId,
       }));
@@ -453,7 +400,7 @@ export class MarketController {
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new HttpException(
+      throw new OrderOperationFailedException(
         "Internal server error while retrieving trades",
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
@@ -503,10 +450,7 @@ export class MarketController {
       // Check if market exists using MarketService for more reliable check
       const market = await this.marketService.getMarketById(marketId);
       if (!market) {
-        throw new HttpException(
-          `Market ${marketId} not found`,
-          HttpStatus.NOT_FOUND,
-        );
+        throw new MarketNotFoundException(marketId);
       }
 
       // Get basic stats (for now, return mock data - can be enhanced later)
@@ -531,7 +475,7 @@ export class MarketController {
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new HttpException(
+      throw new OrderOperationFailedException(
         "Internal server error while retrieving market stats",
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
@@ -608,10 +552,7 @@ export class MarketController {
       // Check if market exists using MarketService for more reliable check
       const market = await this.marketService.getMarketById(marketId);
       if (!market) {
-        throw new HttpException(
-          `Market ${marketId} not found`,
-          HttpStatus.NOT_FOUND,
-        );
+        throw new MarketNotFoundException(marketId);
       }
 
       const lastPrice = await this.orderService.getLastTradePrice(marketId);
@@ -624,7 +565,7 @@ export class MarketController {
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new HttpException(
+      throw new OrderOperationFailedException(
         "Internal server error while retrieving last price",
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
@@ -688,19 +629,13 @@ export class MarketController {
     try {
       // Validate input
       if (!body.side) {
-        throw new HttpException(
-          "Missing required field: side",
-          HttpStatus.BAD_REQUEST,
-        );
+        throw new OrderOperationFailedException("Missing required field: side");
       }
 
       // Check if market exists using MarketService for more reliable check
       const market = await this.marketService.getMarketById(marketId);
       if (!market) {
-        throw new HttpException(
-          `Market ${marketId} not found`,
-          HttpStatus.NOT_FOUND,
-        );
+        throw new MarketNotFoundException(marketId);
       }
 
       // Cancel the order
@@ -716,16 +651,15 @@ export class MarketController {
           message: "Order cancelled successfully",
         };
       } else {
-        throw new HttpException(
+        throw new OrderOperationFailedException(
           "Order not found or could not be cancelled",
-          HttpStatus.BAD_REQUEST,
         );
       }
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new HttpException(
+      throw new OrderOperationFailedException(
         "Internal server error during order cancellation",
         HttpStatus.INTERNAL_SERVER_ERROR,
       );

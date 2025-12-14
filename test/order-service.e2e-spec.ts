@@ -21,7 +21,9 @@ describe("OrderService (e2e)", () => {
       imports: [AppModule],
     }).compile();
 
-    app = moduleFixture.createNestApplication();
+    app = moduleFixture.createNestApplication({
+      logger: false,
+    });
     await app.init();
 
     orderService = moduleFixture.get<OrderService>(OrderService);
@@ -34,9 +36,6 @@ describe("OrderService (e2e)", () => {
   afterAll(async () => {
     // Clean up test data after all tests are complete
     await TestCleanupHelper.cleanupTestData(app);
-    
-    // Close all connections to prevent Jest from hanging
-    await TestCleanupHelper.closeAllConnections(app);
     
     // Close the NestJS application
     await app.close();
@@ -101,25 +100,18 @@ describe("OrderService (e2e)", () => {
         portfolioId: realPortfolioId,
       };
 
-      // Note: This test might fail if portfolio doesn't exist
-      // In a real scenario, you'd need to create the portfolio first
-      try {
-        const orderWithTimestamp = { ...order, timestamp: new Date() };
-        const result = await orderService.addOrder(testMarketId, orderWithTimestamp);
-        expect(result).toBe(true);
+      const orderWithTimestamp = { ...order, timestamp: new Date() };
+      const result = await orderService.addOrder(testMarketId, orderWithTimestamp);
+      expect(result).toBe(true);
 
-        // Verify order was added to order book
-        const orderBook = await orderService.getOrderBook(testMarketId);
-        expect(orderBook.bids).toHaveLength(1);
-        expect(orderBook.bids[0]).toMatchObject({
-          price: 50000,
-          quantity: 1.5,
-          side: "bid",
-        });
-      } catch (error) {
-        // If portfolio doesn't exist, this is expected
-        console.log("Expected error due to missing portfolio:", error.message);
-      }
+      // Verify order was added to order book
+      const orderBook = await orderService.getOrderBook(testMarketId);
+      expect(orderBook.bids).toHaveLength(1);
+      expect(orderBook.bids[0]).toMatchObject({
+        price: 50000,
+        quantity: 1.5,
+        side: "bid",
+      });
     });
 
     it("should add a sell order to the order book", async () => {
@@ -132,22 +124,18 @@ describe("OrderService (e2e)", () => {
         portfolioId: realPortfolioId,
       };
 
-      try {
-        const orderWithTimestamp = { ...order, timestamp: new Date() };
-        const result = await orderService.addOrder(testMarketId, orderWithTimestamp);
-        expect(result).toBe(true);
+      const orderWithTimestamp = { ...order, timestamp: new Date() };
+      const result = await orderService.addOrder(testMarketId, orderWithTimestamp);
+      expect(result).toBe(true);
 
-        // Verify order was added to order book
-        const orderBook = await orderService.getOrderBook(testMarketId);
-        expect(orderBook.asks).toHaveLength(1);
-        expect(orderBook.asks[0]).toMatchObject({
-          price: 51000,
-          quantity: 2.0,
-          side: "ask",
-        });
-      } catch (error) {
-        console.log("Expected error due to missing portfolio:", error.message);
-      }
+      // Verify order was added to order book
+      const orderBook = await orderService.getOrderBook(testMarketId);
+      expect(orderBook.asks).toHaveLength(1);
+      expect(orderBook.asks[0]).toMatchObject({
+        price: 51000,
+        quantity: 2.0,
+        side: "ask",
+      });
     });
   });
 
@@ -158,7 +146,10 @@ describe("OrderService (e2e)", () => {
     });
 
     it("should match orders with exact price and quantity", async () => {
-      // Add a sell order first
+      // Create holdings for the ask order
+      await TestCleanupHelper.createTestHolding(app, realPortfolioId, testMarketId, 1.0);
+
+      // Add a sell order first (using addOrderWithMatching so it's saved to database)
       const sellOrder: Omit<OrderBookEntryDto, "timestamp"> = {
         marketId: testMarketId,
         orderId: uuidv4(),
@@ -168,40 +159,40 @@ describe("OrderService (e2e)", () => {
         portfolioId: realPortfolioId,
       };
 
-      try {
-        const sellOrderWithTimestamp = { ...sellOrder, timestamp: new Date() };
-        await orderService.addOrder(testMarketId, sellOrderWithTimestamp);
+      const sellResult = await orderService.addOrderWithMatching(testMarketId, sellOrder);
+      // Ask order should be added without matches (no matching bid yet)
+      expect(sellResult.matches).toHaveLength(0);
 
-        // Add a matching buy order
-        const buyOrder: Omit<OrderBookEntryDto, "timestamp"> = {
-          marketId: testMarketId,
-          orderId: uuidv4(),
-          side: "bid",
-          price: 50000,
-          quantity: 1.0,
-          portfolioId: realPortfolioId,
-        };
+      // Add a matching buy order
+      const buyOrder: Omit<OrderBookEntryDto, "timestamp"> = {
+        marketId: testMarketId,
+        orderId: uuidv4(),
+        side: "bid",
+        price: 50000,
+        quantity: 1.0,
+        portfolioId: realPortfolioId,
+      };
 
-        const matchResult = await orderService.addOrderWithMatching(testMarketId, buyOrder);
+      const matchResult = await orderService.addOrderWithMatching(testMarketId, buyOrder);
 
-        expect(matchResult.matches).toHaveLength(1);
-        expect(matchResult.matches[0]).toMatchObject({
-          marketId: testMarketId,
-          takerSide: "bid",
-          matchedQuantity: 1.0,
-          matchedPrice: 50000,
-        });
+      expect(matchResult.matches).toHaveLength(1);
+      expect(matchResult.matches[0]).toMatchObject({
+        marketId: testMarketId,
+        takerSide: "bid",
+        matchedQuantity: 1.0,
+        matchedPrice: 50000,
+      });
 
-        // Both orders should be completely filled
-        expect(matchResult.remainingOrder).toBeNull();
-        expect(matchResult.completedOrderIds).toHaveLength(1);
-      } catch (error) {
-        console.log("Expected error due to missing portfolio:", error.message);
-      }
+      // Both orders should be completely filled
+      expect(matchResult.remainingOrder).toBeFalsy();
+      expect(matchResult.completedOrderIds).toHaveLength(1);
     });
 
     it("should handle partial fills", async () => {
-      // Add a large sell order
+      // Create holdings for the ask order
+      await TestCleanupHelper.createTestHolding(app, realPortfolioId, testMarketId, 5.0);
+
+      // Add a large sell order (using addOrderWithMatching so it's saved to database)
       const sellOrder: Omit<OrderBookEntryDto, "timestamp"> = {
         marketId: testMarketId,
         orderId: uuidv4(),
@@ -211,36 +202,36 @@ describe("OrderService (e2e)", () => {
         portfolioId: realPortfolioId,
       };
 
-      try {
-        const sellOrderWithTimestamp = { ...sellOrder, timestamp: new Date() };
-        await orderService.addOrder(testMarketId, sellOrderWithTimestamp);
+      const sellResult = await orderService.addOrderWithMatching(testMarketId, sellOrder);
+      // Ask order should be added without matches
+      expect(sellResult.matches).toHaveLength(0);
 
-        // Add a smaller buy order
-        const buyOrder: Omit<OrderBookEntryDto, "timestamp"> = {
-          marketId: testMarketId,
-          orderId: uuidv4(),
-          side: "bid",
-          price: 50000,
-          quantity: 2.0,
-          portfolioId: realPortfolioId,
-        };
+      // Add a smaller buy order
+      const buyOrder: Omit<OrderBookEntryDto, "timestamp"> = {
+        marketId: testMarketId,
+        orderId: uuidv4(),
+        side: "bid",
+        price: 50000,
+        quantity: 2.0,
+        portfolioId: realPortfolioId,
+      };
 
-        const matchResult = await orderService.addOrderWithMatching(testMarketId, buyOrder);
+      const matchResult = await orderService.addOrderWithMatching(testMarketId, buyOrder);
 
-        expect(matchResult.matches).toHaveLength(1);
-        expect(matchResult.matches[0].matchedQuantity).toBe(2.0);
+      expect(matchResult.matches).toHaveLength(1);
+      expect(matchResult.matches[0].matchedQuantity).toBe(2.0);
 
-        // Buy order should be completely filled, sell order partially filled
-        expect(matchResult.remainingOrder).toBeNull();
-        expect(matchResult.updatedOrders).toHaveLength(1);
-        expect(matchResult.updatedOrders[0].newQuantity).toBe(3.0); // 5.0 - 2.0
-      } catch (error) {
-        console.log("Expected error due to missing portfolio:", error.message);
-      }
+      // Buy order should be completely filled, sell order partially filled
+      expect(matchResult.remainingOrder).toBeFalsy();
+      expect(matchResult.updatedOrders).toHaveLength(1);
+      expect(matchResult.updatedOrders[0].newQuantity).toBe(3.0); // 5.0 - 2.0
     });
 
     it("should handle multiple matches", async () => {
-      // Add multiple sell orders at the same price
+      // Create holdings for the ask orders (1.0 + 1.5 = 2.5)
+      await TestCleanupHelper.createTestHolding(app, realPortfolioId, testMarketId, 2.5);
+
+      // Add multiple sell orders at the same price (using addOrderWithMatching so they're saved to database)
       const sellOrders = [
         {
           marketId: testMarketId,
@@ -260,39 +251,36 @@ describe("OrderService (e2e)", () => {
         },
       ];
 
-      try {
-        // Add sell orders
-        for (const order of sellOrders) {
-          const orderWithTimestamp = { ...order, timestamp: new Date() };
-          await orderService.addOrder(testMarketId, orderWithTimestamp);
-        }
-
-        // Add a buy order that matches both
-        const buyOrder: Omit<OrderBookEntryDto, "timestamp"> = {
-          marketId: testMarketId,
-          orderId: uuidv4(),
-          side: "bid",
-          price: 50000,
-          quantity: 2.5,
-          portfolioId: realPortfolioId,
-        };
-
-        const matchResult = await orderService.addOrderWithMatching(testMarketId, buyOrder);
-
-        expect(matchResult.matches).toHaveLength(2);
-        
-        // First match should be 1.0, second should be 1.5
-        expect(matchResult.matches[0].matchedQuantity).toBe(1.0);
-        expect(matchResult.matches[1].matchedQuantity).toBe(1.5);
-
-        // Buy order should be completely filled
-        expect(matchResult.remainingOrder).toBeNull();
-        
-        // Both sell orders should be completely filled
-        expect(matchResult.completedOrderIds).toHaveLength(2);
-      } catch (error) {
-        console.log("Expected error due to missing portfolio:", error.message);
+      // Add sell orders
+      for (const order of sellOrders) {
+        const result = await orderService.addOrderWithMatching(testMarketId, order);
+        // Ask orders should be added without matches
+        expect(result.matches).toHaveLength(0);
       }
+
+      // Add a buy order that matches both
+      const buyOrder: Omit<OrderBookEntryDto, "timestamp"> = {
+        marketId: testMarketId,
+        orderId: uuidv4(),
+        side: "bid",
+        price: 50000,
+        quantity: 2.5,
+        portfolioId: realPortfolioId,
+      };
+
+      const matchResult = await orderService.addOrderWithMatching(testMarketId, buyOrder);
+
+      expect(matchResult.matches).toHaveLength(2);
+      
+      // First match should be 1.0, second should be 1.5
+      expect(matchResult.matches[0].matchedQuantity).toBe(1.0);
+      expect(matchResult.matches[1].matchedQuantity).toBe(1.5);
+
+      // Buy order should be completely filled
+      expect(matchResult.remainingOrder).toBeFalsy();
+      
+      // Both sell orders should be completely filled
+      expect(matchResult.completedOrderIds).toHaveLength(2);
     });
   });
 
@@ -302,7 +290,10 @@ describe("OrderService (e2e)", () => {
     });
 
     it("should match orders by price priority", async () => {
-      // Add sell orders at different prices
+      // Create holdings for the ask orders (1.0 + 1.0 = 2.0)
+      await TestCleanupHelper.createTestHolding(app, realPortfolioId, testMarketId, 2.0);
+
+      // Add sell orders at different prices (using addOrderWithMatching so they're saved to database)
       const sellOrders = [
         {
           marketId: testMarketId,
@@ -322,30 +313,27 @@ describe("OrderService (e2e)", () => {
         },
       ];
 
-      try {
-        // Add sell orders
-        for (const order of sellOrders) {
-          const orderWithTimestamp = { ...order, timestamp: new Date() };
-          await orderService.addOrder(testMarketId, orderWithTimestamp);
-        }
-
-        // Add a buy order that should match the lower-priced sell
-        const buyOrder: Omit<OrderBookEntryDto, "timestamp"> = {
-          marketId: testMarketId,
-          orderId: uuidv4(),
-          side: "bid",
-          price: 50050, // Between the two sell prices
-          quantity: 1.0,
-          portfolioId: realPortfolioId,
-        };
-
-        const matchResult = await orderService.addOrderWithMatching(testMarketId, buyOrder);
-
-        expect(matchResult.matches).toHaveLength(1);
-        expect(matchResult.matches[0].matchedPrice).toBe(50000); // Should match at the lower price
-      } catch (error) {
-        console.log("Expected error due to missing portfolio:", error.message);
+      // Add sell orders
+      for (const order of sellOrders) {
+        const result = await orderService.addOrderWithMatching(testMarketId, order);
+        // Ask orders should be added without matches
+        expect(result.matches).toHaveLength(0);
       }
+
+      // Add a buy order that should match the lower-priced sell
+      const buyOrder: Omit<OrderBookEntryDto, "timestamp"> = {
+        marketId: testMarketId,
+        orderId: uuidv4(),
+        side: "bid",
+        price: 50050, // Between the two sell prices
+        quantity: 1.0,
+        portfolioId: realPortfolioId,
+      };
+
+      const matchResult = await orderService.addOrderWithMatching(testMarketId, buyOrder);
+
+      expect(matchResult.matches).toHaveLength(1);
+      expect(matchResult.matches[0].matchedPrice).toBe(50000); // Should match at the lower price
     });
   });
 
@@ -357,27 +345,23 @@ describe("OrderService (e2e)", () => {
     });
 
     it("should get orders by market and side", async () => {
-      try {
-        // Add some test orders first
-        const testOrder: Omit<OrderBookEntryDto, "timestamp"> = {
-          marketId: testMarketId,
-          orderId: uuidv4(),
-          side: "bid",
-          price: 49000,
-          quantity: 2.0,
-          portfolioId: realPortfolioId,
-        };
+      // Add some test orders first
+      const testOrder: Omit<OrderBookEntryDto, "timestamp"> = {
+        marketId: testMarketId,
+        orderId: uuidv4(),
+        side: "bid",
+        price: 49000,
+        quantity: 2.0,
+        portfolioId: realPortfolioId,
+      };
 
-        const testOrderWithTimestamp = { ...testOrder, timestamp: new Date() };
-        await orderService.addOrder(testMarketId, testOrderWithTimestamp);
+      const testOrderWithTimestamp = { ...testOrder, timestamp: new Date() };
+      await orderService.addOrder(testMarketId, testOrderWithTimestamp);
 
-        // Note: getOrdersBySide is now private, so we'll test through getOrderBook
-        const orderBook = await orderService.getOrderBook(testMarketId);
-        expect(Array.isArray(orderBook.bids)).toBe(true);
-        expect(orderBook.bids.length).toBeGreaterThan(0);
-      } catch (error) {
-        console.log("Expected error due to missing portfolio:", error.message);
-      }
+      // Note: getOrdersBySide is now private, so we'll test through getOrderBook
+      const orderBook = await orderService.getOrderBook(testMarketId);
+      expect(Array.isArray(orderBook.bids)).toBe(true);
+      expect(orderBook.bids.length).toBeGreaterThan(0);
     });
   });
 

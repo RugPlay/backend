@@ -59,13 +59,25 @@ export class TradeDto {
   price: number;
 
   @ApiPropertyOptional({
-    description: "The user ID of the taker",
+    description: "The holding ID of the taker",
+    example: "123e4567-e89b-12d3-a456-426614174000",
+  })
+  takerHoldingId?: string;
+
+  @ApiPropertyOptional({
+    description: "The holding ID of the maker",
+    example: "456e7890-e89b-12d3-a456-426614174001",
+  })
+  makerHoldingId?: string;
+
+  @ApiPropertyOptional({
+    description: "The user ID of the taker (for filtering)",
     example: "user_123e4567-e89b-12d3-a456-426614174000",
   })
   takerUserId?: string;
 
   @ApiPropertyOptional({
-    description: "The user ID of the maker",
+    description: "The user ID of the maker (for filtering)",
     example: "user_456e7890-e89b-12d3-a456-426614174001",
   })
   makerUserId?: string;

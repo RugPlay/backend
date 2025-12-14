@@ -17,6 +17,7 @@ export class TradeDao extends KyselyDao<TradeDao> {
   async createTrade(trade: TradeExecutionDto, trx?: any): Promise<string | null> {
     try {
       const db = trx || this.kysely;
+      
       const result = await db
         .insertInto('trades')
         .values({
@@ -28,16 +29,21 @@ export class TradeDao extends KyselyDao<TradeDao> {
           type: trade.type,
           quantity: trade.quantity.toString(),
           price: trade.price.toString(),
-          taker_user_id: trade.takerUserId,
-          maker_user_id: trade.makerUserId,
+          taker_holding_id: trade.takerHoldingId || null,
+          maker_holding_id: trade.makerHoldingId || null,
+          taker_user_id: trade.takerUserId || null,
+          maker_user_id: trade.makerUserId || null,
         } as any)
         .returning('id')
         .executeTakeFirst();
-
       return result?.id || null;
     } catch (error) {
       console.error("Error creating trade:", error);
-      console.error("Trade data:", trade);
+      console.error("Error details:", error instanceof Error ? error.message : String(error));
+      console.error("Trade data:", JSON.stringify(trade, null, 2));
+      if (error instanceof Error && error.stack) {
+        console.error("Stack trace:", error.stack);
+      }
       return null;
     }
   }
@@ -77,6 +83,7 @@ export class TradeDao extends KyselyDao<TradeDao> {
         .limit(limit)
         .offset(offset)
         .execute();
+      
       return results.map((record) => this.mapRecordToDto(record));
     } catch (error) {
       console.error("Error fetching recent trades:", error);
@@ -153,6 +160,7 @@ export class TradeDao extends KyselyDao<TradeDao> {
 
       const result = await query
         .orderBy('created_at', 'desc')
+        .orderBy('id', 'desc') // Secondary sort for deterministic ordering
         .executeTakeFirst();
 
       return result ? parseFloat(result.price) : null;
@@ -202,6 +210,10 @@ export class TradeDao extends KyselyDao<TradeDao> {
         type: trade.type,
         quantity: trade.quantity.toString(),
         price: trade.price.toString(),
+        taker_holding_id: (trade as any).takerHoldingId || null,
+        maker_holding_id: (trade as any).makerHoldingId || null,
+        taker_user_id: (trade as any).takerUserId || null,
+        maker_user_id: (trade as any).makerUserId || null,
         created_at: trade.timestamp,
       }));
 
@@ -270,6 +282,22 @@ export class TradeDao extends KyselyDao<TradeDao> {
   }
 
   /**
+   * Delete all trades for a specific market
+   */
+  async deleteTradesByMarket(marketId: string): Promise<boolean> {
+    try {
+      await this.kysely
+        .deleteFrom('trades')
+        .where('market_id', '=', marketId)
+        .execute();
+      return true;
+    } catch (error) {
+      console.error("Error deleting trades by market:", error);
+      return false;
+    }
+  }
+
+  /**
    * Map database record to TradeDto
    */
   private mapRecordToDto(record: any): TradeDto {
@@ -283,6 +311,8 @@ export class TradeDao extends KyselyDao<TradeDao> {
     dto.type = record.type;
     dto.quantity = parseFloat(record.quantity);
     dto.price = parseFloat(record.price);
+    dto.takerHoldingId = record.taker_holding_id;
+    dto.makerHoldingId = record.maker_holding_id;
     dto.takerUserId = record.taker_user_id;
     dto.makerUserId = record.maker_user_id;
     dto.createdAt = record.created_at;

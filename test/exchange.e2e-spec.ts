@@ -17,7 +17,9 @@ describe("Exchange (e2e)", () => {
       imports: [AppModule],
     }).compile();
 
-    app = moduleFixture.createNestApplication();
+    app = moduleFixture.createNestApplication({
+      logger: false,
+    });
     await app.init();
 
     // Setup test data
@@ -27,9 +29,6 @@ describe("Exchange (e2e)", () => {
   afterAll(async () => {
     // Clean up test data after all tests are complete
     await TestCleanupHelper.cleanupTestData(app);
-    
-    // Close all connections to prevent Jest from hanging
-    await TestCleanupHelper.closeAllConnections(app);
     
     // Close the NestJS application
     await app.close();
@@ -172,6 +171,9 @@ describe("Exchange (e2e)", () => {
     });
 
     it("should place a sell order (ask) without matching", async () => {
+      // Create holdings for ASK order
+      await TestCleanupHelper.createTestHolding(app, testPortfolioId2, testMarketId, 2.0);
+
       const orderData = {
         side: "ask" as const,
         price: 51000,
@@ -249,6 +251,13 @@ describe("Exchange (e2e)", () => {
           portfolioId: testPortfolioId2,
         },
       ];
+
+      // Create holdings for new ASK orders
+      // Note: The previous test already reserved 2.0 holdings for the existing ASK order
+      // So we need to create additional holdings for the new orders (1.5 + 3.0 = 4.5)
+      // Plus we need to account for the already reserved 2.0, so total needed is 6.5
+      const totalAskQuantity = 2.0 + 1.5 + 3.0; // Reserved from previous test + new orders
+      await TestCleanupHelper.createTestHolding(app, testPortfolioId2, testMarketId, totalAskQuantity);
 
       // Place all buy orders
       for (const order of buyOrders) {
@@ -385,6 +394,7 @@ describe("Exchange (e2e)", () => {
         .expect(200);
 
       expect(Array.isArray(response.body)).toBe(true);
+
       // Should have trades from our matching tests
       expect(response.body.length).toBeGreaterThan(0);
       // Verify trade structure

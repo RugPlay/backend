@@ -93,8 +93,10 @@ export class OrderDao extends KyselyDao<OrderDao> {
         .selectAll()
         .where('market_id', '=', marketId)
         .where('side', '=', side)
+        .where('quantity', '>', '0') // Only include orders with remaining quantity
         .orderBy('price', orderBy)
         .orderBy('created_at', 'asc') // Time priority
+        .orderBy('id', 'asc') // Secondary sort by ID for deterministic ordering
         .forUpdate()
         .execute();
       return results.map((record) => this.mapRecordToDto(record));
@@ -114,7 +116,15 @@ export class OrderDao extends KyselyDao<OrderDao> {
         .where('id', '=', orderId)
         .executeTakeFirst();
       return result.numDeletedRows > 0;
-    } catch (error) {
+    } catch (error: any) {
+      // Check if it's a foreign key constraint violation (order has associated trades)
+      if (error?.code === '23503') {
+        // Order cannot be deleted because it has associated trades
+        // This is expected behavior - trades preserve historical records
+        // Silently return false - this is not an error condition
+        return false;
+      }
+      // Log other errors
       console.error("Error deleting order:", error);
       return false;
     }
@@ -122,6 +132,7 @@ export class OrderDao extends KyselyDao<OrderDao> {
 
   /**
    * Delete all orders for a specific market
+   * Note: Trades must be deleted first due to foreign key constraints
    */
   async deleteOrdersByMarket(marketId: string): Promise<boolean> {
     try {

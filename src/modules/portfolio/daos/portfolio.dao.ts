@@ -245,6 +245,23 @@ export class PortfolioDao extends KyselyDao<PortfolioDao> {
   }
 
   /**
+   * Get all portfolios (for system-wide calculations)
+   */
+  async getAllPortfolios(): Promise<PortfolioDto[]> {
+    try {
+      const portfolios = await this.kysely
+        .selectFrom('portfolios')
+        .selectAll()
+        .execute();
+
+      return (portfolios || []).map((portfolio) => this.mapRecordToDto(portfolio));
+    } catch (error) {
+      console.error("Error getting all portfolios:", error);
+      return [];
+    }
+  }
+
+  /**
    * Map database record to PortfolioDto
    */
   private mapRecordToDto(record: any): PortfolioDto {

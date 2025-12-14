@@ -1,4 +1,4 @@
-import { ApiProperty } from "@nestjs/swagger";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 
 export class HoldingDto {
   @ApiProperty({
@@ -38,6 +38,18 @@ export class HoldingDto {
     example: 1.5,
   })
   quantity: number;
+
+  @ApiPropertyOptional({
+    description: "Average cost basis per unit (average price paid)",
+    example: 50000.0,
+  })
+  averageCostBasis?: number;
+
+  @ApiPropertyOptional({
+    description: "Total cost paid for all holdings (quantity * average_cost_basis)",
+    example: 75000.0,
+  })
+  totalCost?: number;
 
   @ApiProperty({
     description: "The timestamp when the holding was created",

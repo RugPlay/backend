@@ -10,6 +10,11 @@ import { ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { OrderService } from "../services/order.service";
 import { OrderBookDto } from "../dtos/order/order-book.dto";
 import { OrderBookEntryDto } from "../dtos/order/order-book-entry.dto";
+import {
+  MarketNotFoundException,
+  OrderOperationFailedException,
+  OrderBookNotFoundException,
+} from "../exceptions";
 
 @ApiTags("Order")
 @Controller("order")
@@ -44,10 +49,7 @@ export class OrderController {
     // Check if market exists first
     const marketExists = await this.orderService.hasOrderBook(marketId);
     if (!marketExists) {
-      throw new HttpException(
-        `Market not found: ${marketId}`,
-        HttpStatus.NOT_FOUND,
-      );
+      throw new MarketNotFoundException(marketId);
     }
 
     const orderBook = await this.orderService.getOrderBook(marketId);
@@ -70,9 +72,8 @@ export class OrderController {
   ): Promise<OrderBookEntryDto> {
     const bestBid = await this.orderService.getBestBid(marketId);
     if (!bestBid) {
-      throw new HttpException(
+      throw new OrderBookNotFoundException(
         `No bids found for market: ${marketId}`,
-        HttpStatus.NOT_FOUND,
       );
     }
     return bestBid;
@@ -94,9 +95,8 @@ export class OrderController {
   ): Promise<OrderBookEntryDto> {
     const bestAsk = await this.orderService.getBestAsk(marketId);
     if (!bestAsk) {
-      throw new HttpException(
+      throw new OrderBookNotFoundException(
         `No asks found for market: ${marketId}`,
-        HttpStatus.NOT_FOUND,
       );
     }
     return bestAsk;
@@ -118,9 +118,8 @@ export class OrderController {
   ): Promise<{ spread: number }> {
     const spread = await this.orderService.getSpread(marketId);
     if (spread === null) {
-      throw new HttpException(
+      throw new OrderBookNotFoundException(
         `Cannot calculate spread for market: ${marketId}`,
-        HttpStatus.NOT_FOUND,
       );
     }
     return { spread };
@@ -158,10 +157,7 @@ export class OrderController {
       parseInt(levels, 10),
     );
     if (!depth) {
-      throw new HttpException(
-        `Market not found: ${marketId}`,
-        HttpStatus.NOT_FOUND,
-      );
+      throw new MarketNotFoundException(marketId);
     }
     return depth;
   }

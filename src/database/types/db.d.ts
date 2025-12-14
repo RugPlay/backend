@@ -519,11 +519,13 @@ export interface TimescaledbInformationJobStats {
 export interface Trades {
   created_at: Generated<Timestamp>;
   id: Generated<string>;
+  maker_holding_id: string | null;
   maker_order_id: string;
   maker_user_id: string | null;
   market_id: string;
   price: Numeric;
   quantity: Numeric;
+  taker_holding_id: string | null;
   taker_order_id: string;
   taker_side: string;
   taker_user_id: string | null;
