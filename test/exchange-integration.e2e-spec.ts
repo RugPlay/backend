@@ -1371,4 +1371,131 @@ describe("Exchange Integration (e2e)", () => {
       await TestHelpers.clearOrderBook(testMarketId);
     });
   });
+
+  describe("Cache Reinitialization", () => {
+    beforeEach(async () => {
+      await TestHelpers.clearOrderBook(testMarketId);
+      await TestHelpers.resetAllPortfolios();
+    });
+
+    it("should restore order book from database after Redis cache is cleared", async () => {
+      const orderService = moduleFixture.get<OrderService>(OrderService);
+      const tracker = new PortfolioStateTracker();
+      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
+      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
+
+      // Create holdings for ask orders
+      const totalAskQuantity = 6.7; // 1.5 + 2.0 + 3.2
+      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, totalAskQuantity, tracker);
+
+      // Create market depth orders
+      const { bids, asks } = TestDataHelper.createMarketDepthOrders(
+        testMarketId,
+        bidderPortfolioId,
+        askerPortfolioId
+      );
+
+      // Ensure sufficient balance for bid orders
+      const bidderTotalNeeded = bids.reduce((sum, bid) => sum + bid.price * bid.quantity, 0);
+      await TestHelpers.ensureMinimumBalance(bidderPortfolioId, bidderTotalNeeded + 10000, tracker);
+
+      // Place all orders to build up the order book
+      await TestHelpers.placeBidOrdersWithTracking(testMarketId, bids, tracker);
+      await TestHelpers.placeAskOrdersWithTracking(testMarketId, asks, tracker);
+
+      // Verify order book is populated
+      const orderBookBefore = await TestHelpers.getOrderBook(testMarketId);
+      TestHelpers.verifyOrderBookStructure(orderBookBefore, 3, 3);
+      TestHelpers.verifyOrderBookPriceOrdering(orderBookBefore, [50000, 49500, 49000], [51000, 51500, 52000]);
+
+      // Store the exact order book state for comparison
+      const bidsBefore = JSON.parse(JSON.stringify(orderBookBefore.bids));
+      const asksBefore = JSON.parse(JSON.stringify(orderBookBefore.asks));
+
+      // Clear Redis cache
+      await orderService.clearAllRedisData();
+
+      // Verify order book is empty in Redis (cache cleared)
+      const orderBookAfterClear = await TestHelpers.getOrderBook(testMarketId);
+      expect(orderBookAfterClear.bids).toHaveLength(0);
+      expect(orderBookAfterClear.asks).toHaveLength(0);
+
+      // Reinitialize cache from database
+      await orderService.restoreOrderBookForMarket(testMarketId);
+
+      // Verify order book is restored correctly
+      const orderBookAfterRestore = await TestHelpers.getOrderBook(testMarketId);
+      TestHelpers.verifyOrderBookStructure(orderBookAfterRestore, 3, 3);
+      TestHelpers.verifyOrderBookPriceOrdering(orderBookAfterRestore, [50000, 49500, 49000], [51000, 51500, 52000]);
+
+      // Verify exact order details match
+      expect(orderBookAfterRestore.bids).toHaveLength(bidsBefore.length);
+      expect(orderBookAfterRestore.asks).toHaveLength(asksBefore.length);
+
+      // Verify each bid order matches
+      for (let i = 0; i < bidsBefore.length; i++) {
+        expect(orderBookAfterRestore.bids[i].price).toBe(bidsBefore[i].price);
+        expect(orderBookAfterRestore.bids[i].quantity).toBeCloseTo(bidsBefore[i].quantity, 0.0001);
+        expect(orderBookAfterRestore.bids[i].side).toBe(bidsBefore[i].side);
+        expect(orderBookAfterRestore.bids[i].portfolioId).toBe(bidsBefore[i].portfolioId);
+      }
+
+      // Verify each ask order matches
+      for (let i = 0; i < asksBefore.length; i++) {
+        expect(orderBookAfterRestore.asks[i].price).toBe(asksBefore[i].price);
+        expect(orderBookAfterRestore.asks[i].quantity).toBeCloseTo(asksBefore[i].quantity, 0.0001);
+        expect(orderBookAfterRestore.asks[i].side).toBe(asksBefore[i].side);
+        expect(orderBookAfterRestore.asks[i].portfolioId).toBe(asksBefore[i].portfolioId);
+      }
+    });
+
+    it("should restore order book with partial fills correctly", async () => {
+      const orderService = moduleFixture.get<OrderService>(OrderService);
+      const tracker = new PortfolioStateTracker();
+      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
+      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
+
+      // Create holdings for ask order
+      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 1.2, tracker);
+      await TestHelpers.ensureMinimumBalance(bidderPortfolioId, 51000 + 10000, tracker);
+
+      // Place ask order
+      await TestHelpers.placeOrder(testMarketId, {
+        side: "ask",
+        price: 51000,
+        quantity: 1.2,
+        portfolioId: askerPortfolioId,
+      }).expect(201);
+
+      // Place matching bid order (partial fill - 1.0 out of 1.2)
+      await TestHelpers.placeOrder(testMarketId, {
+        side: "bid",
+        price: 51000,
+        quantity: 1.0,
+        portfolioId: bidderPortfolioId,
+      }).expect(201);
+
+      // Verify order book has the partially filled ask order
+      const orderBookBefore = await TestHelpers.getOrderBook(testMarketId);
+      expect(orderBookBefore.asks).toHaveLength(1);
+      expect(orderBookBefore.asks[0].quantity).toBeCloseTo(0.2, 10); // 1.2 - 1.0 = 0.2
+
+      // Store the exact state
+      const askBefore = JSON.parse(JSON.stringify(orderBookBefore.asks[0]));
+
+      // Clear Redis cache
+      await orderService.clearAllRedisData();
+
+      // Reinitialize cache from database
+      await orderService.restoreOrderBookForMarket(testMarketId);
+
+      // Verify the partially filled order is restored correctly
+      const orderBookAfterRestore = await TestHelpers.getOrderBook(testMarketId);
+      expect(orderBookAfterRestore.asks).toHaveLength(1);
+      expect(orderBookAfterRestore.asks[0].price).toBe(askBefore.price);
+      expect(orderBookAfterRestore.asks[0].quantity).toBeCloseTo(askBefore.quantity, 0.0001);
+      expect(orderBookAfterRestore.asks[0].side).toBe(askBefore.side);
+      expect(orderBookAfterRestore.asks[0].portfolioId).toBe(askBefore.portfolioId);
+    });
+  });
 });

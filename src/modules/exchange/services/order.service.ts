@@ -68,8 +68,9 @@ export class OrderService implements OnModuleInit {
 
   /**
    * Restore order book for a specific market from database
+   * Public for testing purposes
    */
-  private async restoreOrderBookForMarket(marketId: string): Promise<void> {
+  async restoreOrderBookForMarket(marketId: string): Promise<void> {
     try {
       const orders = await this.orderDao.getOrdersByMarket(marketId);
 
