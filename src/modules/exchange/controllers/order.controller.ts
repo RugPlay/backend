@@ -226,11 +226,11 @@ export class OrderController {
         side: orderRequest.side,
         price: orderRequest.price,
         quantity: orderRequest.quantity,
-        portfolioId: orderRequest.portfolioId,
+        userId: orderRequest.userId,
+        quoteAssetId: orderRequest.quoteAssetId,
       };
 
       // Place order with matching
-      // Add missing portfolioId to order object for type compatibility
       const result = await this.orderService.addOrderWithMatching(
         marketId,
         order,
@@ -253,7 +253,8 @@ export class OrderController {
               marketId: result.remainingOrder.marketId,
               price: result.remainingOrder.price,
               quantity: result.remainingOrder.quantity,
-              portfolioId: result.remainingOrder.portfolioId,
+              userId: result.remainingOrder.userId,
+              quoteAssetId: result.remainingOrder.quoteAssetId,
               timestamp: result.remainingOrder.timestamp,
               orderId: result.remainingOrder.orderId,
               side: result.remainingOrder.side,

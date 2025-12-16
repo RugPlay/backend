@@ -8,3 +8,4 @@ export class UpdateHoldingDto extends PartialType(
     "updatedAt",
   ] as const),
 ) {}
+

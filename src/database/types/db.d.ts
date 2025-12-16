@@ -301,46 +301,60 @@ export interface _TimescaledbInternalHypertableChunkLocalSize {
   total_bytes: Int8 | null;
 }
 
-export interface Holdings {
-  created_at: Generated<Timestamp>;
+export interface Assets {
   id: Generated<string>;
-  market_id: string;
-  portfolio_id: string;
+  symbol: string;
+  name: string;
+  type: string;
+  decimals: Generated<number>;
+  is_active: Generated<boolean>;
+  created_at: Generated<Timestamp>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface Holdings {
+  id: Generated<string>;
+  user_id: string;
+  asset_id: string;
   quantity: Generated<Numeric>;
+  average_cost_basis: Generated<Numeric>;
+  total_cost: Generated<Numeric>;
+  created_at: Generated<Timestamp>;
   updated_at: Generated<Timestamp>;
 }
 
 export interface Markets {
-  base_currency: string;
-  category: string;
-  created_at: Generated<Timestamp>;
   id: Generated<string>;
-  is_24h: Generated<boolean>;
-  is_active: Generated<boolean>;
-  max_quantity: Numeric | null;
-  metadata: Json | null;
+  name: string;
+  symbol: string;
+  category: string;
+  base_asset_id: string;
+  quote_asset_id: string;
   min_price_increment: Generated<Numeric>;
   min_quantity_increment: Generated<Numeric>;
-  name: string;
-  quote_currency: string;
-  symbol: string;
+  max_quantity: Numeric | null;
+  is_active: Generated<boolean>;
+  is_24h: Generated<boolean>;
   timezone: Generated<string>;
-  trading_end: string | null;
   trading_start: string | null;
+  trading_end: string | null;
+  metadata: Json | null;
+  created_at: Generated<Timestamp>;
   updated_at: Generated<Timestamp>;
 }
 
 export interface Orders {
-  created_at: Generated<Timestamp>;
-  filled_quantity: Generated<Numeric>;
   id: Generated<string>;
   market_id: string;
-  order_type: Generated<string>;
-  portfolio_id: string;
+  user_id: string;
+  quote_asset_id: string;
+  side: string;
   price: Numeric;
   quantity: Numeric;
-  side: string;
+  filled_quantity: Generated<Numeric>;
+  order_type: Generated<string>;
   status: Generated<string>;
+  created_at: Generated<Timestamp>;
   updated_at: Generated<Timestamp>;
 }
 
@@ -562,6 +576,7 @@ export interface DB {
   "_timescaledb_internal.bgw_policy_chunk_stats": _TimescaledbInternalBgwPolicyChunkStats;
   "_timescaledb_internal.compressed_chunk_stats": _TimescaledbInternalCompressedChunkStats;
   "_timescaledb_internal.hypertable_chunk_local_size": _TimescaledbInternalHypertableChunkLocalSize;
+  assets: Assets;
   holdings: Holdings;
   markets: Markets;
   orders: Orders;

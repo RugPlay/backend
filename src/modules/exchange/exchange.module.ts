@@ -8,11 +8,10 @@ import { TradeDao } from "./daos/trade.dao";
 import { MarketController } from "./controllers/market.controller";
 import { OrderController } from "./controllers/order.controller";
 import { RedisModule } from "@/redis/redis.module";
-import { PortfolioDao } from "@/modules/portfolio/daos/portfolio.dao";
-import { HoldingDao } from "@/modules/portfolio/daos/holding.dao";
+import { AssetsModule } from "@/modules/assets/assets.module";
 
 @Module({
-  imports: [RedisModule],
+  imports: [RedisModule, AssetsModule],
   controllers: [MarketController, OrderController],
   providers: [
     OrderService,
@@ -21,8 +20,6 @@ import { HoldingDao } from "@/modules/portfolio/daos/holding.dao";
     OrderDao,
     MarketDao,
     TradeDao,
-    PortfolioDao,
-    HoldingDao,
   ],
   exports: [
     OrderService,
@@ -31,8 +28,6 @@ import { HoldingDao } from "@/modules/portfolio/daos/holding.dao";
     OrderDao,
     MarketDao,
     TradeDao,
-    PortfolioDao,
-    HoldingDao,
   ],
 })
 export class ExchangeModule {}

@@ -8,36 +8,30 @@ export class HoldingDto {
   id: string;
 
   @ApiProperty({
-    description: "The portfolio ID that owns this holding",
-    example: "123e4567-e89b-12d3-a456-426614174000",
-  })
-  portfolioId: string;
-
-  @ApiProperty({
     description: "The user ID that owns this holding",
     example: "user_123e4567-e89b-12d3-a456-426614174000",
   })
   userId: string;
 
   @ApiProperty({
-    description: "The market ID of the asset",
-    example: "market_123e4567-e89b-12d3-a456-426614174000",
+    description: "The asset ID",
+    example: "123e4567-e89b-12d3-a456-426614174000",
   })
-  marketId: string;
+  assetId: string;
 
   @ApiProperty({
-    description: "The market symbol for display",
-    example: "BTCUSD",
+    description: "The asset symbol for display",
+    example: "BTC",
     required: false,
   })
-  marketSymbol?: string;
+  assetSymbol?: string;
 
   @ApiProperty({
-    description: "The market name for display",
-    example: "Bitcoin to USD",
+    description: "The asset name for display",
+    example: "Bitcoin",
     required: false,
   })
-  marketName?: string;
+  assetName?: string;
 
   @ApiProperty({
     description: "The quantity of assets held",
@@ -69,3 +63,4 @@ export class HoldingDto {
   })
   updatedAt: Date;
 }
+

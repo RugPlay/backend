@@ -12,6 +12,7 @@ export class MarketDao extends KyselyDao<MarketDao> {
 
   /**
    * Insert a new market into the database
+   * Requires baseAssetId and quoteAssetId to be set in the DTO
    */
   async createMarket(market: CreateMarketDto): Promise<string | null> {
     try {
@@ -21,8 +22,10 @@ export class MarketDao extends KyselyDao<MarketDao> {
           symbol: market.symbol,
           name: market.name,
           category: market.category,
-          base_currency: market.baseCurrency,
-          quote_currency: market.quoteCurrency,
+          base_asset: market.baseAsset,
+          quote_asset: market.quoteAsset,
+          base_asset_id: market.baseAssetId,
+          quote_asset_id: market.quoteAssetId,
           min_price_increment: (market.minPriceIncrement || 0.01).toString(),
           min_quantity_increment: (
             market.minQuantityIncrement || 0.00000001
@@ -92,12 +95,20 @@ export class MarketDao extends KyselyDao<MarketDao> {
         query = query.where('category', '=', filters.category);
       }
 
-      if (filters?.baseCurrency) {
-        query = query.where('base_currency', '=', filters.baseCurrency);
+      if (filters?.baseAsset) {
+        query = query.where('base_asset' as any, '=', filters.baseAsset);
       }
 
-      if (filters?.quoteCurrency) {
-        query = query.where('quote_currency', '=', filters.quoteCurrency);
+      if (filters?.quoteAsset) {
+        query = query.where('quote_asset' as any, '=', filters.quoteAsset);
+      }
+
+      if (filters?.baseAssetId) {
+        query = query.where('base_asset_id', '=', filters.baseAssetId);
+      }
+
+      if (filters?.quoteAssetId) {
+        query = query.where('quote_asset_id', '=', filters.quoteAssetId);
       }
 
       if (filters?.isActive !== undefined) {
@@ -162,10 +173,14 @@ export class MarketDao extends KyselyDao<MarketDao> {
       if (market.symbol !== undefined) updateData.symbol = market.symbol;
       if (market.name !== undefined) updateData.name = market.name;
       if (market.category !== undefined) updateData.category = market.category;
-      if (market.baseCurrency !== undefined)
-        updateData.base_currency = market.baseCurrency;
-      if (market.quoteCurrency !== undefined)
-        updateData.quote_currency = market.quoteCurrency;
+      if (market.baseAsset !== undefined)
+        updateData.base_asset = market.baseAsset;
+      if (market.quoteAsset !== undefined)
+        updateData.quote_asset = market.quoteAsset;
+      if (market.baseAssetId !== undefined)
+        updateData.base_asset_id = market.baseAssetId;
+      if (market.quoteAssetId !== undefined)
+        updateData.quote_asset_id = market.quoteAssetId;
       if (market.minPriceIncrement !== undefined)
         updateData.min_price_increment = market.minPriceIncrement.toString();
       if (market.minQuantityIncrement !== undefined)
@@ -240,8 +255,10 @@ export class MarketDao extends KyselyDao<MarketDao> {
     dto.symbol = record.symbol;
     dto.name = record.name;
     dto.category = record.category as MarketCategory;
-    dto.baseCurrency = record.base_currency;
-    dto.quoteCurrency = record.quote_currency;
+    dto.baseAsset = record.base_asset;
+    dto.quoteAsset = record.quote_asset;
+    dto.baseAssetId = record.base_asset_id;
+    dto.quoteAssetId = record.quote_asset_id;
     dto.minPriceIncrement = parseFloat(record.min_price_increment);
     dto.minQuantityIncrement = parseFloat(record.min_quantity_increment);
     dto.maxQuantity = record.max_quantity

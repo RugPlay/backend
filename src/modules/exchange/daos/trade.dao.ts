@@ -25,6 +25,7 @@ export class TradeDao extends KyselyDao<TradeDao> {
           market_id: trade.marketId,
           taker_order_id: trade.takerOrderId,
           maker_order_id: trade.makerOrderId,
+          taker_side: trade.takerSide,
           type: trade.type,
           quantity: trade.quantity.toString(),
           price: trade.price.toString(),
@@ -32,8 +33,6 @@ export class TradeDao extends KyselyDao<TradeDao> {
           maker_holding_id: trade.makerHoldingId || null,
           taker_user_id: trade.takerUserId || null,
           maker_user_id: trade.makerUserId || null,
-          taker_portfolio_id: trade.takerPortfolioId,
-          maker_portfolio_id: trade.makerPortfolioId,
         } as any)
         .returning('id')
         .executeTakeFirst();
@@ -214,8 +213,6 @@ export class TradeDao extends KyselyDao<TradeDao> {
         maker_holding_id: (trade as any).makerHoldingId || null,
         taker_user_id: (trade as any).takerUserId || null,
         maker_user_id: (trade as any).makerUserId || null,
-        taker_portfolio_id: (trade as any).takerPortfolioId,
-        maker_portfolio_id: (trade as any).makerPortfolioId,
         created_at: trade.timestamp,
       }));
 
@@ -249,8 +246,6 @@ export class TradeDao extends KyselyDao<TradeDao> {
     marketId: string,
     takerOrderId: string,
     makerOrderId: string,
-    takerPortfolioId: string,
-    makerPortfolioId: string,
     type: TradeType,
     quantity: number,
     price: number,
@@ -261,8 +256,6 @@ export class TradeDao extends KyselyDao<TradeDao> {
       marketId,
       takerOrderId,
       makerOrderId,
-      takerPortfolioId,
-      makerPortfolioId,
       type,
       quantity,
       price,
@@ -297,6 +290,7 @@ export class TradeDao extends KyselyDao<TradeDao> {
     dto.marketId = record.market_id;
     dto.takerOrderId = record.taker_order_id;
     dto.makerOrderId = record.maker_order_id;
+    dto.takerSide = record.taker_side;
     dto.type = record.type;
     dto.quantity = parseFloat(record.quantity);
     dto.price = parseFloat(record.price);
@@ -304,8 +298,6 @@ export class TradeDao extends KyselyDao<TradeDao> {
     dto.makerHoldingId = record.maker_holding_id;
     dto.takerUserId = record.taker_user_id;
     dto.makerUserId = record.maker_user_id;
-    dto.takerPortfolioId = record.taker_portfolio_id;
-    dto.makerPortfolioId = record.maker_portfolio_id;
     dto.createdAt = record.created_at;
     dto.updatedAt = record.updated_at;
     return dto;

@@ -22,7 +22,8 @@ export class OrderDao extends KyselyDao<OrderDao> {
         .insertInto('orders')
         .values({
           market_id: order.marketId,
-          portfolio_id: order.portfolioId,
+          user_id: order.userId,
+          quote_asset_id: order.quoteAssetId,
           side: order.side,
           price: order.price.toString(),
           quantity: order.quantity.toString(),
@@ -344,7 +345,8 @@ export class OrderDao extends KyselyDao<OrderDao> {
     const dto = new OrderDto();
     dto.id = record.id;
     dto.marketId = record.market_id;
-    dto.portfolioId = record.portfolio_id;
+    dto.userId = record.user_id;
+    dto.quoteAssetId = record.quote_asset_id;
     dto.side = record.side;
     dto.price = parseFloat(record.price);
     dto.quantity = parseFloat(record.quantity);

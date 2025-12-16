@@ -5,19 +5,22 @@ import { AppModule } from "../src/app.module";
 import { v4 as uuidv4 } from "uuid";
 import { TestDataHelper } from "./helpers/test-data.helper";
 import { TestCleanupHelper } from "./helpers/test-cleanup.helper";
-import { PortfolioStateTracker } from "./helpers/portfolio-state-tracker.helper";
-import { PortfolioService } from "../src/modules/portfolio/services/portfolio.service";
-import { PortfolioDao } from "../src/modules/portfolio/daos/portfolio.dao";
-import { HoldingDao } from "../src/modules/portfolio/daos/holding.dao";
+import { UserAssetStateTracker } from "./helpers/user-asset-state-tracker.helper";
+import { AssetService } from "../src/modules/assets/services/asset.service";
+import { AssetHoldingDao } from "../src/modules/assets/daos/asset-holding.dao";
 import { OrderService } from "../src/modules/exchange/services/order.service";
+import { MarketService } from "../src/modules/exchange/services/market.service";
+import { TradeDao } from "../src/modules/exchange/daos/trade.dao";
 
 describe("Exchange Integration (e2e)", () => {
   let app: INestApplication;
   let moduleFixture: TestingModule;
   let testMarketId: string;
-  let realPortfolioId: string;
-  let bidderPortfolioId: string;
-  let askerPortfolioId: string;
+  let realUserId: string;
+  let bidderUserId: string;
+  let askerUserId: string;
+  let usdAssetId: string;
+  let testAssetId: string;
 
   // Test helper functions
   const TestHelpers = {
@@ -36,14 +39,34 @@ describe("Exchange Integration (e2e)", () => {
     },
 
     /**
-     * Reset all test portfolios to a known state
+     * Clear all trades for a market (test-only operation)
      */
-    async resetAllPortfolios(balance: number = 1000000): Promise<void> {
+    async clearTrades(marketId: string): Promise<void> {
+      try {
+        const tradeDao = moduleFixture.get<TradeDao>(TradeDao);
+        await tradeDao.deleteTradesByMarket(marketId);
+      } catch (error) {
+        // Ignore cleanup errors - market might not exist or already empty
+        console.log("Trades clear warning (ignored):", error.message);
+      }
+    },
+
+    /**
+     * Reset all test users to a known state
+     */
+    async resetAllUsers(usdQuantity: number = 1000000): Promise<void> {
       await Promise.all([
-        TestCleanupHelper.resetPortfolioBalance(app, bidderPortfolioId, balance),
-        TestCleanupHelper.resetPortfolioBalance(app, askerPortfolioId, balance),
-        TestCleanupHelper.resetPortfolioBalance(app, realPortfolioId, balance),
+        TestCleanupHelper.resetAssetQuantity(app, bidderUserId, usdAssetId, usdQuantity),
+        TestCleanupHelper.resetAssetQuantity(app, askerUserId, usdAssetId, usdQuantity),
+        TestCleanupHelper.resetAssetQuantity(app, realUserId, usdAssetId, usdQuantity),
       ]);
+    },
+
+    /**
+     * @deprecated Use resetAllUsers instead
+     */
+    async resetAllPortfolios(usdQuantity: number = 1000000): Promise<void> {
+      return this.resetAllUsers(usdQuantity);
     },
 
     /**
@@ -61,7 +84,7 @@ describe("Exchange Integration (e2e)", () => {
      */
     placeOrder(
       marketId: string,
-      order: { side: "bid" | "ask"; price: number; quantity: number; portfolioId: string }
+      order: { side: "bid" | "ask"; price: number; quantity: number; userId: string; quoteAssetId: string }
     ) {
       return request(app.getHttpServer())
         .post(`/order/${marketId}/place-order`)
@@ -73,7 +96,7 @@ describe("Exchange Integration (e2e)", () => {
      */
     async placeOrderAndGetResponse(
       marketId: string,
-      order: { side: "bid" | "ask"; price: number; quantity: number; portfolioId: string }
+      order: { side: "bid" | "ask"; price: number; quantity: number; userId: string; quoteAssetId: string }
     ) {
       const response = await request(app.getHttpServer())
         .post(`/order/${marketId}/place-order`)
@@ -86,7 +109,7 @@ describe("Exchange Integration (e2e)", () => {
      */
     async placeOrdersSequentially(
       marketId: string,
-      orders: Array<{ side: "bid" | "ask"; price: number; quantity: number; portfolioId: string }>,
+      orders: Array<{ side: "bid" | "ask"; price: number; quantity: number; userId: string; quoteAssetId: string }>,
       delayMs: number = 10
     ) {
       for (const order of orders) {
@@ -98,74 +121,77 @@ describe("Exchange Integration (e2e)", () => {
     },
 
     /**
-     * Ensure portfolio has minimum holdings for a market
+     * Ensure user has minimum base asset holdings for a market
      */
-    async ensureMinimumHoldings(
-      portfolioId: string,
-      marketId: string,
+    async ensureMinimumBaseAsset(
+      userId: string,
+      assetId: string,
       minimumQuantity: number,
-      tracker: PortfolioStateTracker
+      tracker: UserAssetStateTracker
     ): Promise<void> {
-      const state = tracker.getExpectedState(portfolioId);
-      const currentHoldings = state?.startingHoldings[marketId] || 0;
+      const state = tracker.getExpectedState(userId);
+      const currentQuantity = state?.startingAssets[assetId] || 0;
 
-      if (currentHoldings < minimumQuantity) {
-        const needed = minimumQuantity - currentHoldings;
-        await TestCleanupHelper.createTestHolding(app, portfolioId, marketId, needed);
-        await tracker.registerPortfolioFromCurrentState(app, portfolioId);
+      if (currentQuantity < minimumQuantity) {
+        const needed = minimumQuantity - currentQuantity;
+        await TestCleanupHelper.createTestAssetHolding(app, userId, assetId, needed);
+        await tracker.registerUserFromCurrentState(app, userId);
       }
     },
 
     /**
-     * Ensure portfolio has minimum balance
+     * Ensure user has minimum quote asset holdings
      */
-    async ensureMinimumBalance(
-      portfolioId: string,
-      minimumBalance: number,
-      tracker: PortfolioStateTracker
+    async ensureMinimumQuoteAsset(
+      userId: string,
+      assetId: string,
+      minimumQuantity: number,
+      tracker: UserAssetStateTracker
     ): Promise<void> {
-      await TestCleanupHelper.ensureMinimumBalance(app, portfolioId, minimumBalance);
-      await tracker.registerPortfolioFromCurrentState(app, portfolioId);
+      await TestCleanupHelper.ensureMinimumAssetQuantity(app, userId, assetId, minimumQuantity);
+      await tracker.registerUserFromCurrentState(app, userId);
     },
 
     /**
-     * Place bid orders and track balance reservations
+     * Place bid orders and track quote asset reservations
      */
     async placeBidOrdersWithTracking(
       marketId: string,
-      orders: Array<{ side: "bid" | "ask"; price: number; quantity: number; portfolioId: string }>,
-      tracker: PortfolioStateTracker
+      orders: Array<{ side: "bid" | "ask"; price: number; quantity: number; userId: string; quoteAssetId: string }>,
+      tracker: UserAssetStateTracker,
+      quoteAssetId: string
     ): Promise<void> {
       for (const order of orders) {
         const response = await TestHelpers.placeOrderAndGetResponse(marketId, order);
 
         if (response.status !== 201) {
-          // Retry after ensuring sufficient balance
-          const state = tracker.getExpectedState(order.portfolioId);
+          // Retry after ensuring sufficient quote asset
+          const state = tracker.getExpectedState(order.userId);
           const needed = order.price * order.quantity;
-          if ((state?.expectedBalance || 0) < needed) {
-            await TestHelpers.ensureMinimumBalance(order.portfolioId, needed + 10000, tracker);
+          if ((state?.expectedAssets[quoteAssetId] || 0) < needed) {
+            await TestHelpers.ensureMinimumQuoteAsset(order.userId, quoteAssetId, needed + 10000, tracker);
             await TestHelpers.placeOrder(marketId, order).expect(201);
           } else {
             throw new Error(`Order failed: ${JSON.stringify(response.body)}`);
           }
         }
 
-        tracker.reserveBalance(order.portfolioId, order.price * order.quantity);
+        tracker.reserveQuoteAsset(order.userId, quoteAssetId, order.price * order.quantity);
       }
     },
 
     /**
-     * Place ask orders and track holdings reservations
+     * Place ask orders and track base asset reservations
      */
     async placeAskOrdersWithTracking(
       marketId: string,
-      orders: Array<{ side: "bid" | "ask"; price: number; quantity: number; portfolioId: string }>,
-      tracker: PortfolioStateTracker
+      orders: Array<{ side: "bid" | "ask"; price: number; quantity: number; userId: string; quoteAssetId: string }>,
+      tracker: UserAssetStateTracker,
+      baseAssetId: string
     ): Promise<void> {
       for (const order of orders) {
         await TestHelpers.placeOrder(marketId, order).expect(201);
-        tracker.reserveHoldings(order.portfolioId, marketId, order.quantity);
+        tracker.reserveBaseAsset(order.userId, baseAssetId, order.quantity);
       }
     },
 
@@ -174,14 +200,15 @@ describe("Exchange Integration (e2e)", () => {
      */
     recordTradesFromMatches(
       matches: Array<{ matchedPrice: number; matchedQuantity: number }>,
-      portfolioId: string,
-      marketId: string,
+      userId: string,
+      baseAssetId: string,
+      quoteAssetId: string,
       side: "bid" | "ask",
       wasReserved: boolean,
-      tracker: PortfolioStateTracker
+      tracker: UserAssetStateTracker
     ): void {
       for (const match of matches) {
-        tracker.recordTrade(portfolioId, marketId, side, match.matchedPrice, match.matchedQuantity, wasReserved);
+        tracker.recordTrade(userId, baseAssetId, quoteAssetId, side, match.matchedPrice, match.matchedQuantity, wasReserved);
       }
     },
 
@@ -189,22 +216,25 @@ describe("Exchange Integration (e2e)", () => {
      * Handle partial fill restoration in tracker
      */
     handlePartialFillRestoration(
-      tracker: PortfolioStateTracker,
-      portfolioId: string,
-      marketId: string,
+      tracker: UserAssetStateTracker,
+      userId: string,
+      assetId: string,
       originalQuantity: number,
       filledQuantity: number
     ): void {
       const unfilledQuantity = originalQuantity - filledQuantity;
       if (unfilledQuantity <= 0) return;
 
-      const state = tracker.getExpectedState(portfolioId);
+      const state = tracker.getExpectedState(userId);
       if (!state) return;
 
-      // System restores unfilled quantity by adding it back to total holdings
-      state.startingHoldings[marketId] = (state.startingHoldings[marketId] || 0) + unfilledQuantity;
-      state.reservedHoldings[marketId] = Math.max(0, (state.reservedHoldings[marketId] || 0) - unfilledQuantity);
-      state.expectedHoldings[marketId] = state.startingHoldings[marketId] - (state.reservedHoldings[marketId] || 0);
+      // System restores unfilled quantity by adding it back to the database
+      // The system already restored it in the DB, so we need to update expectedAssets to reflect this
+      // We don't update startingAssets because that represents the initial state
+      // We reduce reservedAssets since the unfilled portion is no longer reserved
+      state.reservedAssets[assetId] = Math.max(0, (state.reservedAssets[assetId] || 0) - unfilledQuantity);
+      // The system restored the unfilled quantity in the DB, so expectedAssets should increase by that amount
+      state.expectedAssets[assetId] = (state.expectedAssets[assetId] || 0) + unfilledQuantity;
     },
 
     /**
@@ -276,9 +306,38 @@ describe("Exchange Integration (e2e)", () => {
   });
 
   async function setupTestEnvironment() {
+    // Create test assets
+    const assets = await TestCleanupHelper.createTestAssets(app);
+    usdAssetId = assets.usdAssetId;
+    
+    // Create TEST asset for the market
+    const assetService = moduleFixture.get<AssetService>(AssetService);
+    const testAsset = await assetService.createAsset({
+      symbol: "TEST",
+      name: "Test Asset",
+      type: "crypto",
+      decimals: 8,
+      isActive: true,
+    });
+    testAssetId = testAsset.id;
+
+    // Create test user IDs
+    realUserId = `test-user-${uuidv4()}`;
+    bidderUserId = `bidder-user-${uuidv4()}`;
+    askerUserId = `asker-user-${uuidv4()}`;
+
+    // Give users initial USD holdings for trading
+    await TestCleanupHelper.createTestAssetHolding(app, realUserId, usdAssetId, 1000000);
+    await TestCleanupHelper.createTestAssetHolding(app, bidderUserId, usdAssetId, 1000000);
+    await TestCleanupHelper.createTestAssetHolding(app, askerUserId, usdAssetId, 1000000);
+
     const marketData = TestDataHelper.createTestMarket({
       name: "Integration Test Market",
       symbol: TestDataHelper.generateUniqueSymbol("INTEG"),
+      baseAsset: "TEST",
+      quoteAsset: "USD",
+      baseAssetId: testAssetId,
+      quoteAssetId: usdAssetId,
     });
 
     const marketResponse = await request(app.getHttpServer())
@@ -287,20 +346,12 @@ describe("Exchange Integration (e2e)", () => {
       .expect(201);
 
     testMarketId = marketResponse.body.id;
-
-    const testUserId = `test-user-${uuidv4()}`;
-    const bidderUserId = `bidder-user-${uuidv4()}`;
-    const askerUserId = `asker-user-${uuidv4()}`;
-    
-    realPortfolioId = await TestCleanupHelper.createTestPortfolio(app, testUserId, 1000000);
-    bidderPortfolioId = await TestCleanupHelper.createTestPortfolio(app, bidderUserId, 1000000);
-    askerPortfolioId = await TestCleanupHelper.createTestPortfolio(app, askerUserId, 1000000);
   }
 
   describe("Order Book Management", () => {
     beforeEach(async () => {
       await TestHelpers.clearOrderBook(testMarketId);
-      await TestHelpers.resetAllPortfolios();
+      await TestHelpers.resetAllUsers();
     });
 
     it("should start with an empty order book", async () => {
@@ -309,69 +360,72 @@ describe("Exchange Integration (e2e)", () => {
     });
 
     it("should build market depth with multiple orders", async () => {
-      const tracker = new PortfolioStateTracker();
-      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
+      const tracker = new UserAssetStateTracker();
+      await tracker.registerUserFromCurrentState(app, bidderUserId);
+      await tracker.registerUserFromCurrentState(app, askerUserId);
 
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 6.7, tracker);
+      await TestHelpers.ensureMinimumBaseAsset(askerUserId, testAssetId, 6.7, tracker);
 
       const { bids, asks } = TestDataHelper.createMarketDepthOrders(
         testMarketId,
-        bidderPortfolioId,
-        askerPortfolioId
+        bidderUserId,
+        askerUserId,
+        usdAssetId
       );
 
       const bidderTotalNeeded = bids.reduce((sum, bid) => sum + bid.price * bid.quantity, 0);
-      await TestHelpers.ensureMinimumBalance(bidderPortfolioId, bidderTotalNeeded + 10000, tracker);
+      await TestHelpers.ensureMinimumQuoteAsset(bidderUserId, usdAssetId, bidderTotalNeeded + 10000, tracker);
 
-      await TestHelpers.placeBidOrdersWithTracking(testMarketId, bids, tracker);
-      await TestHelpers.placeAskOrdersWithTracking(testMarketId, asks, tracker);
+      await TestHelpers.placeBidOrdersWithTracking(testMarketId, bids, tracker, usdAssetId);
+      await TestHelpers.placeAskOrdersWithTracking(testMarketId, asks, tracker, testAssetId);
 
       const orderBook = await TestHelpers.getOrderBook(testMarketId);
       TestHelpers.verifyOrderBookStructure(orderBook, 3, 3);
     });
 
     it("should maintain correct price ordering in order book", async () => {
-      const tracker = new PortfolioStateTracker();
-      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
+      const tracker = new UserAssetStateTracker();
+      await tracker.registerUserFromCurrentState(app, bidderUserId);
+      await tracker.registerUserFromCurrentState(app, askerUserId);
 
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 6.7, tracker);
+      await TestHelpers.ensureMinimumBaseAsset(askerUserId, testAssetId, 6.7, tracker);
 
       const { bids, asks } = TestDataHelper.createMarketDepthOrders(
         testMarketId,
-        bidderPortfolioId,
-        askerPortfolioId
+        bidderUserId,
+        askerUserId,
+        usdAssetId
       );
 
       const bidderTotalNeeded = bids.reduce((sum, bid) => sum + bid.price * bid.quantity, 0);
-      await TestHelpers.ensureMinimumBalance(bidderPortfolioId, bidderTotalNeeded + 10000, tracker);
+      await TestHelpers.ensureMinimumQuoteAsset(bidderUserId, usdAssetId, bidderTotalNeeded + 10000, tracker);
 
-      await TestHelpers.placeBidOrdersWithTracking(testMarketId, bids, tracker);
-      await TestHelpers.placeAskOrdersWithTracking(testMarketId, asks, tracker);
+      await TestHelpers.placeBidOrdersWithTracking(testMarketId, bids, tracker, usdAssetId);
+      await TestHelpers.placeAskOrdersWithTracking(testMarketId, asks, tracker, testAssetId);
 
       const orderBook = await TestHelpers.getOrderBook(testMarketId);
       TestHelpers.verifyOrderBookPriceOrdering(orderBook, [50000, 49500, 49000], [51000, 51500, 52000]);
     });
 
     it("should calculate spread correctly", async () => {
-      const tracker = new PortfolioStateTracker();
-      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
+      const tracker = new UserAssetStateTracker();
+      await tracker.registerUserFromCurrentState(app, bidderUserId);
+      await tracker.registerUserFromCurrentState(app, askerUserId);
 
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 6.7, tracker);
+      await TestHelpers.ensureMinimumBaseAsset(askerUserId, testAssetId, 6.7, tracker);
 
       const { bids, asks } = TestDataHelper.createMarketDepthOrders(
         testMarketId,
-        bidderPortfolioId,
-        askerPortfolioId
+        bidderUserId,
+        askerUserId,
+        usdAssetId
       );
 
       const bidderTotalNeeded = bids.reduce((sum, bid) => sum + bid.price * bid.quantity, 0);
-      await TestHelpers.ensureMinimumBalance(bidderPortfolioId, bidderTotalNeeded + 10000, tracker);
+      await TestHelpers.ensureMinimumQuoteAsset(bidderUserId, usdAssetId, bidderTotalNeeded + 10000, tracker);
 
-      await TestHelpers.placeBidOrdersWithTracking(testMarketId, bids, tracker);
-      await TestHelpers.placeAskOrdersWithTracking(testMarketId, asks, tracker);
+      await TestHelpers.placeBidOrdersWithTracking(testMarketId, bids, tracker, usdAssetId);
+      await TestHelpers.placeAskOrdersWithTracking(testMarketId, asks, tracker, testAssetId);
 
       const orderBook = await TestHelpers.getOrderBook(testMarketId);
       const spread = TestDataHelper.calculateSpread(orderBook);
@@ -382,32 +436,39 @@ describe("Exchange Integration (e2e)", () => {
   describe("Trade Execution", () => {
     beforeEach(async () => {
       await TestHelpers.clearOrderBook(testMarketId);
-      await TestHelpers.resetAllPortfolios();
+      await TestHelpers.clearTrades(testMarketId);
+      await TestHelpers.resetAllUsers();
+      // Also reset base asset for all users to ensure clean state
+      await TestCleanupHelper.resetAssetQuantity(app, askerUserId, testAssetId, 0);
+      await TestCleanupHelper.resetAssetQuantity(app, bidderUserId, testAssetId, 0);
+      await TestCleanupHelper.resetAssetQuantity(app, realUserId, testAssetId, 0);
     });
 
     it("should execute a matching trade when orders cross", async () => {
-      const tracker = new PortfolioStateTracker();
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, realPortfolioId);
+      const tracker = new UserAssetStateTracker();
+      await tracker.registerUserFromCurrentState(app, askerUserId);
+      await tracker.registerUserFromCurrentState(app, realUserId);
 
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 1.2, tracker);
-      await TestHelpers.ensureMinimumBalance(realPortfolioId, 51000 + 10000, tracker);
+      await TestHelpers.ensureMinimumBaseAsset(askerUserId, testAssetId, 1.2, tracker);
+      await TestHelpers.ensureMinimumQuoteAsset(realUserId, usdAssetId, 51000 + 10000, tracker);
 
       // Place ask order
       await TestHelpers.placeOrder(testMarketId, {
         side: "ask",
         price: 51000,
         quantity: 1.2,
-        portfolioId: askerPortfolioId,
+        userId: askerUserId,
+        quoteAssetId: usdAssetId,
       }).expect(201);
 
       // Place matching bid order
-      tracker.reserveBalance(realPortfolioId, 51000 * 1.0);
+      tracker.reserveQuoteAsset(realUserId, usdAssetId, 51000 * 1.0);
       const matchResponse = await TestHelpers.placeOrder(testMarketId, {
         side: "bid",
         price: 51000,
         quantity: 1.0,
-        portfolioId: realPortfolioId,
+        userId: realUserId,
+        quoteAssetId: usdAssetId,
       }).expect(201);
 
       expect(matchResponse.body.matches).toHaveLength(1);
@@ -419,19 +480,20 @@ describe("Exchange Integration (e2e)", () => {
     });
 
     it("should update order book after partial fill", async () => {
-      const tracker = new PortfolioStateTracker();
-        await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, realPortfolioId);
+      const tracker = new UserAssetStateTracker();
+      await tracker.registerUserFromCurrentState(app, askerUserId);
+      await tracker.registerUserFromCurrentState(app, realUserId);
 
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 1.2, tracker);
-      await TestHelpers.ensureMinimumBalance(realPortfolioId, 51000 + 10000, tracker);
+      await TestHelpers.ensureMinimumBaseAsset(askerUserId, testAssetId, 1.2, tracker);
+      await TestHelpers.ensureMinimumQuoteAsset(realUserId, usdAssetId, 51000 + 10000, tracker);
 
       // Place ask order
       await TestHelpers.placeOrder(testMarketId, {
         side: "ask",
         price: 51000,
         quantity: 1.2,
-        portfolioId: askerPortfolioId,
+        userId: askerUserId,
+        quoteAssetId: usdAssetId,
       }).expect(201);
 
       // Place matching bid order (partial fill)
@@ -439,7 +501,8 @@ describe("Exchange Integration (e2e)", () => {
         side: "bid",
         price: 51000,
         quantity: 1.0,
-        portfolioId: realPortfolioId,
+        userId: realUserId,
+        quoteAssetId: usdAssetId,
       }).expect(201);
 
       const orderBook = await TestHelpers.getOrderBook(testMarketId);
@@ -448,19 +511,20 @@ describe("Exchange Integration (e2e)", () => {
     });
 
     it("should record trades correctly", async () => {
-      const tracker = new PortfolioStateTracker();
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, realPortfolioId);
+      const tracker = new UserAssetStateTracker();
+      await tracker.registerUserFromCurrentState(app, askerUserId);
+      await tracker.registerUserFromCurrentState(app, realUserId);
 
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 1.0, tracker);
-      await TestHelpers.ensureMinimumBalance(realPortfolioId, 51000 + 10000, tracker);
+      await TestHelpers.ensureMinimumBaseAsset(askerUserId, testAssetId, 1.0, tracker);
+      await TestHelpers.ensureMinimumQuoteAsset(realUserId, usdAssetId, 51000 + 10000, tracker);
 
       // Place ask order
       await TestHelpers.placeOrder(testMarketId, {
         side: "ask",
         price: 51000,
         quantity: 1.0,
-        portfolioId: askerPortfolioId,
+        userId: askerUserId,
+        quoteAssetId: usdAssetId,
       }).expect(201);
 
       // Place matching bid order
@@ -468,35 +532,43 @@ describe("Exchange Integration (e2e)", () => {
         side: "bid",
         price: 51000,
         quantity: 1.0,
-        portfolioId: realPortfolioId,
+        userId: realUserId,
+        quoteAssetId: usdAssetId,
       }).expect(201);
 
       await TestHelpers.verifyTradeRecorded(testMarketId, 51000, 1.0);
     });
 
-    it("should create trades for all matches and transfer holdings/balance correctly", async () => {
-      const tracker = new PortfolioStateTracker();
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, realPortfolioId);
+    it("should create trades for all matches and transfer assets correctly", async () => {
+      const tracker = new UserAssetStateTracker();
+      
+      // Reset base asset to exactly 3.0 to ensure clean state (not just ensure minimum)
+      await TestCleanupHelper.resetAssetQuantity(app, askerUserId, testAssetId, 3.0);
+      
+      // Register to get accurate starting state
+      
+      // Verify the base asset was actually created in the database
+      const assetHoldingDao = moduleFixture.get(AssetHoldingDao);
+      const askerBaseAssetBeforeOrders = await assetHoldingDao.getAsset(askerUserId, testAssetId);
+      const askerBaseAssetQuantityBeforeOrders = askerBaseAssetBeforeOrders ? parseFloat(askerBaseAssetBeforeOrders.quantity.toString()) : 0;
+      expect(askerBaseAssetQuantityBeforeOrders).toBeGreaterThanOrEqual(3.0);
+      
+      // Now register users to get accurate starting state
+      await tracker.registerUserFromCurrentState(app, askerUserId);
+      await tracker.registerUserFromCurrentState(app, bidderUserId);
+      await tracker.registerUserFromCurrentState(app, realUserId);
 
       // Get starting states
-      const askerStartingState = tracker.getExpectedState(askerPortfolioId);
-      const bidderStartingState = tracker.getExpectedState(bidderPortfolioId);
-      const askerStartingBalance = askerStartingState?.startingBalance || 1000000;
-      const bidderStartingBalance = bidderStartingState?.startingBalance || 1000000;
-      const askerStartingHoldings = askerStartingState?.startingHoldings[testMarketId] || 0;
+      const askerStartingState = tracker.getExpectedState(askerUserId);
+      const bidderStartingState = tracker.getExpectedState(bidderUserId);
+      const askerStartingQuoteAsset = askerStartingState?.startingAssets[usdAssetId] || 1000000;
+      const bidderStartingQuoteAsset = bidderStartingState?.startingAssets[usdAssetId] || 1000000;
+      const finalAskerStartingBaseAsset = askerStartingState?.startingAssets[testAssetId] || 0;
 
-      // Create holdings for ask orders (need 3.0 total: 1.0 + 1.5 + 0.5)
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 3.0, tracker);
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-      const updatedAskerState = tracker.getExpectedState(askerPortfolioId);
-      const finalAskerStartingHoldings = updatedAskerState?.startingHoldings[testMarketId] || 0;
-
-      // Ensure sufficient balance for bid orders
+      // Ensure sufficient quote asset for bid orders
       const totalBidCost = 50000 * 1.0 + 50000 * 1.5 + 50000 * 0.5; // 150,000
-      await TestHelpers.ensureMinimumBalance(bidderPortfolioId, totalBidCost + 10000, tracker);
-      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
+      await TestHelpers.ensureMinimumQuoteAsset(bidderUserId, usdAssetId, totalBidCost + 10000, tracker);
+      await tracker.registerUserFromCurrentState(app, bidderUserId);
 
       // Place multiple ask orders at the same price
       const askOrders = [
@@ -506,23 +578,38 @@ describe("Exchange Integration (e2e)", () => {
       ];
 
       for (const askOrder of askOrders) {
-        tracker.reserveHoldings(askerPortfolioId, testMarketId, askOrder.quantity);
-        await TestHelpers.placeOrder(testMarketId, {
+        tracker.reserveBaseAsset(askerUserId, testAssetId, askOrder.quantity);
+        const response = await TestHelpers.placeOrder(testMarketId, {
           side: "ask",
           price: askOrder.price,
           quantity: askOrder.quantity,
-          portfolioId: askerPortfolioId,
-        }).expect(201);
+          userId: askerUserId,
+          quoteAssetId: usdAssetId,
+        });
+        expect(response.status).toBe(201);
+        
+        // Check base asset after each order to see if it's being deducted
+        const assetAfterOrder = await assetHoldingDao.getAsset(askerUserId, testAssetId);
+        const quantityAfterOrder = assetAfterOrder ? parseFloat(assetAfterOrder.quantity.toString()) : 0;
+        console.log(`After placing ask order ${askOrder.quantity}: base asset quantity = ${quantityAfterOrder}`);
       }
+
+      // Verify base asset was deducted after placing ask orders
+      const askerBaseAssetAfterOrders = await assetHoldingDao.getAsset(askerUserId, testAssetId);
+      const askerBaseAssetQuantityAfterOrders = askerBaseAssetAfterOrders ? parseFloat(askerBaseAssetAfterOrders.quantity.toString()) : 0;
+      console.log(`Final base asset quantity after all orders: ${askerBaseAssetQuantityAfterOrders}`);
+      // After placing 3 orders totaling 3.0, the base asset should be 3.0 - 3.0 = 0
+      expect(askerBaseAssetQuantityAfterOrders).toBe(0);
 
       // Place a bid order that will match all three ask orders
       const totalBidQuantity = 3.0; // 1.0 + 1.5 + 0.5
-      tracker.reserveBalance(bidderPortfolioId, 50000 * totalBidQuantity);
+      tracker.reserveQuoteAsset(bidderUserId, usdAssetId, 50000 * totalBidQuantity);
       const matchResponse = await TestHelpers.placeOrder(testMarketId, {
         side: "bid",
         price: 50000,
         quantity: totalBidQuantity,
-        portfolioId: bidderPortfolioId,
+        userId: bidderUserId,
+        quoteAssetId: usdAssetId,
       }).expect(201);
 
       // Verify we got 3 matches
@@ -535,8 +622,8 @@ describe("Exchange Integration (e2e)", () => {
 
       // Record all trades in tracker
       for (const match of matchResponse.body.matches) {
-        tracker.recordTrade(bidderPortfolioId, testMarketId, "bid", match.matchedPrice, match.matchedQuantity, true);
-        tracker.recordTrade(askerPortfolioId, testMarketId, "ask", match.matchedPrice, match.matchedQuantity, true);
+        tracker.recordTrade(bidderUserId, testAssetId, usdAssetId, "bid", match.matchedPrice, match.matchedQuantity, true);
+        tracker.recordTrade(askerUserId, testAssetId, usdAssetId, "ask", match.matchedPrice, match.matchedQuantity, true);
       }
 
       // Verify trades were created in database
@@ -544,11 +631,11 @@ describe("Exchange Integration (e2e)", () => {
         .get(`/markets/${testMarketId}/trades`)
         .expect(200);
 
-      // Should have exactly 3 trades (one for each match)
-      expect(tradesResponse.body.length).toBeGreaterThanOrEqual(3);
+      // Should have exactly 3 trades (one for each match) - no trades from previous tests
+      expect(tradesResponse.body.length).toBe(3);
 
-      // Get the most recent 3 trades
-      const recentTrades = tradesResponse.body.slice(0, 3);
+      // Get all trades (should be exactly 3)
+      const recentTrades = tradesResponse.body;
 
       // Verify each trade has correct properties
       for (const trade of recentTrades) {
@@ -568,533 +655,299 @@ describe("Exchange Integration (e2e)", () => {
       );
       expect(totalTradeQuantity).toBeCloseTo(totalMatchedQuantity, 0.0001);
 
-      // Verify portfolio states - bidder should have spent money and gained holdings
-      const bidderState = await tracker.verifyPortfolio(app, bidderPortfolioId);
-      expect(bidderState.balance.success).toBe(true);
-      expect(bidderState.balance.expected).toBe(bidderStartingBalance - 150000); // Spent 150,000
+      // Verify user asset states - bidder should have spent quote asset and gained base asset
+      const bidderState = await tracker.verifyUser(app, bidderUserId);
+      expect(bidderState.allSuccess).toBe(true);
+      
+      const bidderQuoteAsset = await tracker.verifyAsset(app, bidderUserId, usdAssetId);
+      expect(bidderQuoteAsset.success).toBe(true);
+      expect(bidderQuoteAsset.expected).toBeCloseTo(bidderStartingQuoteAsset - 150000, 0.01); // Spent 150,000
 
-      const bidderHolding = await tracker.verifyHoldings(app, bidderPortfolioId, testMarketId);
-      expect(bidderHolding.success).toBe(true);
-      const bidderStartingHoldings = bidderStartingState?.startingHoldings[testMarketId] || 0;
-      expect(bidderHolding.expected).toBeCloseTo(bidderStartingHoldings + 3.0, 0.0001); // Gained 3.0
+      const bidderBaseAsset = await tracker.verifyAsset(app, bidderUserId, testAssetId);
+      expect(bidderBaseAsset.success).toBe(true);
+      const bidderStartingBaseAsset = bidderStartingState?.startingAssets[testAssetId] || 0;
+      expect(bidderBaseAsset.expected).toBeCloseTo(bidderStartingBaseAsset + 3.0, 0.0001); // Gained 3.0
 
-      // Verify portfolio states - asker should have gained money and lost holdings
-      const askerState = await tracker.verifyPortfolio(app, askerPortfolioId);
-      expect(askerState.balance.success).toBe(true);
-      expect(askerState.balance.expected).toBe(askerStartingBalance + 150000); // Gained 150,000
+      // Verify user asset states - asker should have gained quote asset and lost base asset
+      const askerState = await tracker.verifyUser(app, askerUserId);
+      if (!askerState.allSuccess) {
+        // Log which assets failed for debugging
+        for (const [assetId, result] of askerState.assets.entries()) {
+          if (!result.success) {
+            console.log(`Asset ${assetId} verification failed: expected ${result.expected}, actual ${result.actual}, difference ${result.difference}`);
+          }
+        }
+      }
+      expect(askerState.allSuccess).toBe(true);
+      
+      const askerQuoteAsset = await tracker.verifyAsset(app, askerUserId, usdAssetId);
+      expect(askerQuoteAsset.success).toBe(true);
+      expect(askerQuoteAsset.expected).toBeCloseTo(askerStartingQuoteAsset + 150000, 0.01); // Gained 150,000
 
-      // Verify that trades were created and balance was transferred correctly
+      // Verify that trades were created and assets were transferred correctly
       // The key verification is that:
       // 1. Number of trades matches number of matches (verified above)
       // 2. Total trade quantity matches total matched quantity (verified above)
-      // 3. Balance was transferred correctly (verified above for both portfolios)
-      // Holdings verification can be complex due to order placement timing, so we focus on
-      // the critical verifications: trades exist and balance transferred correctly
+      // 3. Assets were transferred correctly (verified above for both users)
       
-      // Verify asker balance increased (this confirms the trade executed and money was transferred)
-      expect(askerState.balance.success).toBe(true);
-      expect(askerState.balance.expected).toBe(askerStartingBalance + 150000);
+      // Verify asker quote asset increased (this confirms the trade executed and assets were transferred)
+      expect(askerQuoteAsset.success).toBe(true);
+      expect(askerQuoteAsset.expected).toBeCloseTo(askerStartingQuoteAsset + 150000, 0.01);
       
-      // Verify bidder balance decreased and holdings increased (this confirms the trade executed)
-      expect(bidderState.balance.success).toBe(true);
-      expect(bidderState.balance.expected).toBe(bidderStartingBalance - 150000);
-      expect(bidderHolding.success).toBe(true);
-      expect(bidderHolding.expected).toBeCloseTo(bidderStartingHoldings + 3.0, 0.0001);
+      // Verify bidder quote asset decreased and base asset increased (this confirms the trade executed)
+      expect(bidderQuoteAsset.success).toBe(true);
+      expect(bidderQuoteAsset.expected).toBeCloseTo(bidderStartingQuoteAsset - 150000, 0.01);
+      expect(bidderBaseAsset.success).toBe(true);
+      expect(bidderBaseAsset.expected).toBeCloseTo(bidderStartingBaseAsset + 3.0, 0.0001);
     });
   });
 
-  describe("Money Conservation and Portfolio Valuation", () => {
+  // Note: "Money Conservation and Portfolio Valuation" tests removed
+  // as they depended on PortfolioService which has been removed.
+  // Asset-based holdings tracking is now handled by UserAssetStateTracker.
+
+  describe("User Asset State Management", () => {
     beforeEach(async () => {
       await TestHelpers.clearOrderBook(testMarketId);
-      await TestHelpers.resetAllPortfolios();
-      // Clear holdings to ensure clean state
-      await TestCleanupHelper.clearPortfolioHoldings(app, bidderPortfolioId);
-      await TestCleanupHelper.clearPortfolioHoldings(app, askerPortfolioId);
-      await TestCleanupHelper.clearPortfolioHoldings(app, realPortfolioId);
+      await TestHelpers.resetAllUsers();
     });
 
-    it("should track cost basis and verify no money is created or destroyed", async () => {
-      const portfolioService = moduleFixture.get<PortfolioService>(PortfolioService);
-      const portfolioDao = moduleFixture.get<PortfolioDao>(PortfolioDao);
-      const holdingDao = moduleFixture.get<HoldingDao>(HoldingDao);
-      const tracker = new PortfolioStateTracker();
-      
-      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
+    it("should update buyer asset state after trade", async () => {
+      const tracker = new UserAssetStateTracker();
+      await tracker.registerUserFromCurrentState(app, askerUserId);
+      await tracker.registerUserFromCurrentState(app, realUserId);
 
-      // Ensure bidder has no holdings (clean state)
-      await holdingDao.deletePortfolioHoldings(bidderPortfolioId);
+      await TestHelpers.ensureMinimumBaseAsset(askerUserId, testAssetId, 1.0, tracker);
+      await TestHelpers.ensureMinimumQuoteAsset(realUserId, usdAssetId, 51000 + 10000, tracker);
 
-      // Get initial balances
-      const bidderInitialState = tracker.getExpectedState(bidderPortfolioId);
-      const askerInitialState = tracker.getExpectedState(askerPortfolioId);
-      const bidderInitialBalance = bidderInitialState?.startingBalance || 1000000;
-      const askerInitialBalance = askerInitialState?.startingBalance || 1000000;
-
-      // Create holdings for asker
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 2.0, tracker);
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-
-      // Ensure sufficient balance for bidder
-      const purchaseCost = 50000 * 2.0; // 100,000
-      await TestHelpers.ensureMinimumBalance(bidderPortfolioId, purchaseCost + 10000, tracker);
-      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
+      // Get starting base asset for buyer (should be 0)
+      const buyerStartingState = tracker.getExpectedState(realUserId);
+      const buyerStartingBaseAsset = buyerStartingState?.startingAssets[testAssetId] || 0;
 
       // Place ask order
-      tracker.reserveHoldings(askerPortfolioId, testMarketId, 2.0);
+      tracker.reserveBaseAsset(askerUserId, testAssetId, 1.0);
       await TestHelpers.placeOrder(testMarketId, {
         side: "ask",
-        price: 50000,
-        quantity: 2.0,
-        portfolioId: askerPortfolioId,
+        price: 51000,
+        quantity: 1.0,
+        userId: askerUserId,
+        quoteAssetId: usdAssetId,
       }).expect(201);
 
       // Place matching bid order
-      tracker.reserveBalance(bidderPortfolioId, purchaseCost);
+      tracker.reserveQuoteAsset(realUserId, usdAssetId, 51000 * 1.0);
       const matchResponse = await TestHelpers.placeOrder(testMarketId, {
         side: "bid",
-        price: 50000,
-        quantity: 2.0,
-        portfolioId: bidderPortfolioId,
+        price: 51000,
+        quantity: 1.0,
+        userId: realUserId,
+        quoteAssetId: usdAssetId,
       }).expect(201);
 
       expect(matchResponse.body.matches).toHaveLength(1);
 
-      // Get portfolios to get userIds
-      const bidderPortfolioData = await portfolioDao.getPortfolioById(bidderPortfolioId);
-      const askerPortfolioData = await portfolioDao.getPortfolioById(askerPortfolioId);
+      // Record trades for both sides
+      tracker.recordTrade(realUserId, testAssetId, usdAssetId, "bid", 51000, 1.0, true);
+      tracker.recordTrade(askerUserId, testAssetId, usdAssetId, "ask", 51000, 1.0, true);
+
+      const buyerState = await tracker.verifyUser(app, realUserId);
+      expect(buyerState.allSuccess).toBe(true);
       
-      if (!bidderPortfolioData || !askerPortfolioData) {
-        throw new Error("Failed to get portfolio data");
-      }
+      const buyerQuoteAsset = await tracker.verifyAsset(app, realUserId, usdAssetId);
+      expect(buyerQuoteAsset.success).toBe(true);
+      const startingQuoteAsset = buyerStartingState?.startingAssets[usdAssetId] || 1000000;
+      expect(buyerQuoteAsset.expected).toBeCloseTo(startingQuoteAsset - 51000, 0.01);
 
-      const bidderPortfolio = await portfolioService.getPortfolio(bidderPortfolioData.userId);
-      const askerPortfolio = await portfolioService.getPortfolio(askerPortfolioData.userId);
-
-      // Verify bidder's holding has correct cost basis
-      const bidderHolding = bidderPortfolio.holdings.find(h => h.marketId === testMarketId);
-      expect(bidderHolding).toBeDefined();
-      expect(bidderHolding?.quantity).toBe(2.0);
-      expect(bidderHolding?.averageCostBasis).toBe(50000); // Should be the purchase price
-      expect(bidderHolding?.totalCost).toBe(100000); // 2.0 * 50000
-
-      // Verify asker's holding cost basis was reduced (if they still have holdings)
-      const askerHolding = askerPortfolio.holdings.find(h => h.marketId === testMarketId);
-      if (askerHolding && askerHolding.quantity > 0) {
-        // Cost basis should be reduced proportionally
-        expect(askerHolding.totalCost).toBeLessThanOrEqual(askerInitialBalance);
-      }
-
-      // Verify money conservation for bidder
-      // Initial balance = current balance + cost basis of holdings
-      // 1000000 = 900000 (current balance) + 100000 (cost basis) = 1000000 ✓
-      const bidderVerification = await portfolioService.verifyMoneyConservation(
-        bidderPortfolioData.userId,
-        bidderInitialBalance
-      );
-      expect(bidderVerification.isConserved).toBe(true);
-      expect(bidderVerification.currentBalance + bidderVerification.totalCostBasis).toBeCloseTo(
-        bidderInitialBalance,
-        0.01
-      );
-
-      // Verify money conservation for asker
-      // Initial balance + proceeds from sale = current balance + cost basis of remaining holdings
-      const askerVerification = await portfolioService.verifyMoneyConservation(
-        askerPortfolioData.userId,
-        askerInitialBalance
-      );
-      // For asker: initial balance + proceeds from sale = current balance + cost basis of remaining holdings
-      // 1000000 + 100000 = 1100000 (should equal current + remaining cost basis)
-      const askerCurrentBalance = askerVerification.currentBalance;
-      const askerRemainingCostBasis = askerVerification.totalCostBasis;
-      expect(askerCurrentBalance + askerRemainingCostBasis).toBeCloseTo(
-        askerInitialBalance + 100000, // Initial + sale proceeds
-        0.01
-      );
-    });
-
-    it("should calculate individual holding value correctly", async () => {
-      const portfolioService = moduleFixture.get<PortfolioService>(PortfolioService);
-      const portfolioDao = moduleFixture.get<PortfolioDao>(PortfolioDao);
-      const holdingDao = moduleFixture.get<HoldingDao>(HoldingDao);
-      const tracker = new PortfolioStateTracker();
-      
-      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-
-      // Ensure bidder has no holdings (clean state)
-      await holdingDao.deletePortfolioHoldings(bidderPortfolioId);
-
-      // Create holdings and execute a trade
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 1.0, tracker);
-      await TestHelpers.ensureMinimumBalance(bidderPortfolioId, 51000 + 10000, tracker);
-
-      // Place ask order
-      await TestHelpers.placeOrder(testMarketId, {
-        side: "ask",
-        price: 51000,
-        quantity: 1.0,
-        portfolioId: askerPortfolioId,
-      }).expect(201);
-
-      // Place matching bid order
-      await TestHelpers.placeOrder(testMarketId, {
-        side: "bid",
-        price: 51000,
-        quantity: 1.0,
-        portfolioId: bidderPortfolioId,
-      }).expect(201);
-
-      // Get portfolio to find userId
-      const bidderPortfolioData = await portfolioDao.getPortfolioById(bidderPortfolioId);
-      if (!bidderPortfolioData) {
-        throw new Error("Failed to get portfolio data");
-      }
-
-      // Get holding value
-      const holdingValue = await portfolioService.getHoldingValue(
-        bidderPortfolioData.userId,
-        testMarketId
-      );
-
-      expect(holdingValue).toBeDefined();
-      expect(holdingValue?.quantity).toBe(1.0);
-      expect(holdingValue?.lastPrice).toBe(51000);
-      expect(holdingValue?.value).toBe(51000); // 1.0 * 51000
-      expect(holdingValue?.averageCostBasis).toBe(51000);
-      expect(holdingValue?.totalCost).toBe(51000);
-    });
-
-    it("should calculate total portfolio value correctly", async () => {
-      const portfolioService = moduleFixture.get<PortfolioService>(PortfolioService);
-      const portfolioDao = moduleFixture.get<PortfolioDao>(PortfolioDao);
-      const holdingDao = moduleFixture.get<HoldingDao>(HoldingDao);
-      const tracker = new PortfolioStateTracker();
-      
-      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-
-      // Ensure bidder has no holdings (clean state)
-      await holdingDao.deletePortfolioHoldings(bidderPortfolioId);
-
-      // Get initial balance
-      const bidderInitialState = tracker.getExpectedState(bidderPortfolioId);
-      const bidderInitialBalance = bidderInitialState?.startingBalance || 1000000;
-
-      // Create holdings and execute trades
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 1.0, tracker);
-      await TestHelpers.ensureMinimumBalance(bidderPortfolioId, 51000 + 10000, tracker);
-
-      // Place ask order
-      await TestHelpers.placeOrder(testMarketId, {
-        side: "ask",
-        price: 51000,
-        quantity: 1.0,
-        portfolioId: askerPortfolioId,
-      }).expect(201);
-
-      // Place matching bid order
-      await TestHelpers.placeOrder(testMarketId, {
-        side: "bid",
-        price: 51000,
-        quantity: 1.0,
-        portfolioId: bidderPortfolioId,
-      }).expect(201);
-
-      // Get portfolio to find userId
-      const bidderPortfolioData = await portfolioDao.getPortfolioById(bidderPortfolioId);
-      if (!bidderPortfolioData) {
-        throw new Error("Failed to get portfolio data");
-      }
-
-      // Get total portfolio value
-      const portfolioValue = await portfolioService.getPortfolioValue(bidderPortfolioData.userId);
-
-      expect(portfolioValue).toBeDefined();
-      expect(portfolioValue.cashBalance).toBe(bidderInitialBalance - 51000); // Spent on purchase
-      expect(portfolioValue.holdingsValue).toBe(51000); // 1.0 * 51000
-      expect(portfolioValue.portfolioValue).toBe(bidderInitialBalance); // Balance + holdings value
-      expect(portfolioValue.totalCostBasis).toBe(51000); // Cost basis of holdings
-      expect(portfolioValue.unrealizedGainLoss).toBe(0); // No gain/loss at purchase price
-    });
-
-    it("should conserve total system money - no money created or destroyed", async () => {
-      const portfolioService = moduleFixture.get<PortfolioService>(PortfolioService);
-      const portfolioDao = moduleFixture.get<PortfolioDao>(PortfolioDao);
-      const holdingDao = moduleFixture.get<HoldingDao>(HoldingDao);
-      const tracker = new PortfolioStateTracker();
-      
-      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-
-      // Ensure clean state - clear holdings
-      await holdingDao.deletePortfolioHoldings(bidderPortfolioId);
-      await holdingDao.deletePortfolioHoldings(askerPortfolioId);
-
-      // Get initial system money (sum of all cash balances + cost basis of all holdings)
-      const initialSystemMoney = await portfolioService.getTotalSystemMoney();
-      const initialTotal = initialSystemMoney.totalSystemMoney;
-
-      // Get initial balances for our test portfolios
-      const bidderInitialState = tracker.getExpectedState(bidderPortfolioId);
-      const askerInitialState = tracker.getExpectedState(askerPortfolioId);
-      const bidderInitialBalance = bidderInitialState?.startingBalance || 1000000;
-      const askerInitialBalance = askerInitialState?.startingBalance || 1000000;
-
-      // Scenario: Bidder has 100k, Asker has 0 balance but will sell holdings
-      // Reset asker balance to 0 to match the example
-      await TestCleanupHelper.resetPortfolioBalance(app, askerPortfolioId, 0);
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-
-      // Create holdings for asker (they will sell these)
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 1.0, tracker);
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-
-      // Set cost basis for asker's holdings BEFORE the trade
-      // This simulates the asker having purchased the holdings previously
-      // We need to do this so the holdings represent "money" in the system
-      const purchasePrice = 50000;
-      const purchaseQuantity = 1.0;
-      const purchaseCost = purchasePrice * purchaseQuantity; // 50k
-      
-      const askerHolding = await holdingDao.getHolding(askerPortfolioId, testMarketId);
-      if (askerHolding && askerHolding.quantity > 0) {
-        // Manually set cost basis (this simulates the asker having purchased the holdings)
-        await holdingDao.updateCostBasisOnPurchase(
-          askerPortfolioId,
-          testMarketId,
-          askerHolding.quantity,
-          purchasePrice, // Use same price for simplicity
-        );
-      }
-
-      // Recalculate initial system money after setting cost basis
-      const initialSystemMoneyAfterCostBasis = await portfolioService.getTotalSystemMoney();
-      const initialTotalAfterCostBasis = initialSystemMoneyAfterCostBasis.totalSystemMoney;
-
-      // Ensure bidder has sufficient balance
-      await TestHelpers.ensureMinimumBalance(bidderPortfolioId, purchaseCost + 10000, tracker);
-      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
-
-      // Place ask order (seller)
-      tracker.reserveHoldings(askerPortfolioId, testMarketId, purchaseQuantity);
-      await TestHelpers.placeOrder(testMarketId, {
-        side: "ask",
-        price: purchasePrice,
-        quantity: purchaseQuantity,
-        portfolioId: askerPortfolioId,
-      }).expect(201);
-
-      // Place matching bid order (buyer)
-      tracker.reserveBalance(bidderPortfolioId, purchaseCost);
-      const matchResponse = await TestHelpers.placeOrder(testMarketId, {
-        side: "bid",
-        price: purchasePrice,
-        quantity: purchaseQuantity,
-        portfolioId: bidderPortfolioId,
-      }).expect(201);
-
-      expect(matchResponse.body.matches).toHaveLength(1);
-
-      // Get final system money after trade
-      const finalSystemMoneyAfterTrade = await portfolioService.getTotalSystemMoney();
-      const finalTotalAfterTrade = finalSystemMoneyAfterTrade.totalSystemMoney;
-
-      // Verify system money is conserved
-      // Initial: bidder 100k cash + asker 0 cash + asker 50k cost basis = 150k
-      // After: bidder 50k cash + 50k cost basis + asker 50k cash + 0 cost basis = 150k
-      // Total should remain 150k
-      expect(finalTotalAfterTrade).toBeCloseTo(initialTotalAfterCostBasis, 0.01);
-      
-      // Also verify the breakdown
-      // Bidder should have: 50k cash (100k - 50k spent) + 50k cost basis = 100k
-      const bidderPortfolioData = await portfolioDao.getPortfolioById(bidderPortfolioId);
-      if (!bidderPortfolioData) {
-        throw new Error("Failed to get bidder portfolio");
-      }
-      const bidderValue = await portfolioService.getPortfolioValue(bidderPortfolioData.userId);
-      expect(bidderValue.cashBalance + bidderValue.totalCostBasis).toBeCloseTo(bidderInitialBalance, 0.01);
-      
-      // Asker should have: 50k cash + 0 cost basis (sold all holdings) = 50k
-      const askerPortfolioData = await portfolioDao.getPortfolioById(askerPortfolioId);
-      if (!askerPortfolioData) {
-        throw new Error("Failed to get asker portfolio");
-      }
-      const askerValue = await portfolioService.getPortfolioValue(askerPortfolioData.userId);
-      expect(askerValue.cashBalance + askerValue.totalCostBasis).toBeCloseTo(50000, 0.01);
+      const buyerBaseAsset = await tracker.verifyAsset(app, realUserId, testAssetId);
+      expect(buyerBaseAsset.success).toBe(true);
+      // Expected base asset = starting (0) + gained from trade (1.0)
+      expect(buyerBaseAsset.expected).toBeCloseTo(buyerStartingBaseAsset + 1.0, 0.0001);
     });
   });
 
-  describe("Portfolio State Management", () => {
+  describe("User Asset State Management", () => {
     beforeEach(async () => {
       await TestHelpers.clearOrderBook(testMarketId);
-      await TestHelpers.resetAllPortfolios();
+      await TestHelpers.resetAllUsers();
     });
 
-    it("should update buyer portfolio state after trade", async () => {
-      const tracker = new PortfolioStateTracker();
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, realPortfolioId);
+    it("should update buyer asset state after trade", async () => {
+      const tracker = new UserAssetStateTracker();
+      await tracker.registerUserFromCurrentState(app, askerUserId);
+      await tracker.registerUserFromCurrentState(app, realUserId);
 
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 1.0, tracker);
-      await TestHelpers.ensureMinimumBalance(realPortfolioId, 51000 + 10000, tracker);
+      await TestHelpers.ensureMinimumBaseAsset(askerUserId, testAssetId, 1.0, tracker);
+      await TestHelpers.ensureMinimumQuoteAsset(realUserId, usdAssetId, 51000 + 10000, tracker);
 
-      // Get starting holdings for buyer (should be 0)
-      const buyerStartingState = tracker.getExpectedState(realPortfolioId);
-      const buyerStartingHoldings = buyerStartingState?.startingHoldings[testMarketId] || 0;
+      // Get starting base asset for buyer (should be 0)
+      const buyerStartingState = tracker.getExpectedState(realUserId);
+      const buyerStartingBaseAsset = buyerStartingState?.startingAssets[testAssetId] || 0;
 
       // Place ask order
-      tracker.reserveHoldings(askerPortfolioId, testMarketId, 1.0);
+      tracker.reserveBaseAsset(askerUserId, testAssetId, 1.0);
       await TestHelpers.placeOrder(testMarketId, {
         side: "ask",
         price: 51000,
         quantity: 1.0,
-        portfolioId: askerPortfolioId,
+        userId: askerUserId,
+        quoteAssetId: usdAssetId,
       }).expect(201);
 
       // Place matching bid order
-      tracker.reserveBalance(realPortfolioId, 51000 * 1.0);
+      tracker.reserveQuoteAsset(realUserId, usdAssetId, 51000 * 1.0);
       await TestHelpers.placeOrder(testMarketId, {
         side: "bid",
         price: 51000,
         quantity: 1.0,
-        portfolioId: realPortfolioId,
+        userId: realUserId,
+        quoteAssetId: usdAssetId,
       }).expect(201);
 
       // Record trades for both sides
-      tracker.recordTrade(realPortfolioId, testMarketId, "bid", 51000, 1.0, true);
-      tracker.recordTrade(askerPortfolioId, testMarketId, "ask", 51000, 1.0, true);
+      tracker.recordTrade(realUserId, testAssetId, usdAssetId, "bid", 51000, 1.0, true);
+      tracker.recordTrade(askerUserId, testAssetId, usdAssetId, "ask", 51000, 1.0, true);
 
-      const buyerState = await tracker.verifyPortfolio(app, realPortfolioId);
-      expect(buyerState.balance.success).toBe(true);
-      const startingBalance = tracker.getExpectedState(realPortfolioId)?.startingBalance || 1000000;
-      expect(buyerState.balance.expected).toBe(startingBalance - 51000);
+      const buyerState = await tracker.verifyUser(app, realUserId);
+      expect(buyerState.allSuccess).toBe(true);
+      const startingQuoteAsset = buyerStartingState?.startingAssets[usdAssetId] || 1000000;
+      
+      const buyerQuoteAsset = await tracker.verifyAsset(app, realUserId, usdAssetId);
+      expect(buyerQuoteAsset.success).toBe(true);
+      expect(buyerQuoteAsset.expected).toBeCloseTo(startingQuoteAsset - 51000, 0.01);
 
-      const buyerHolding = await tracker.verifyHoldings(app, realPortfolioId, testMarketId);
-      expect(buyerHolding.success).toBe(true);
-      // Expected holdings = starting (0) + gained from trade (1.0)
-      expect(buyerHolding.expected).toBeCloseTo(buyerStartingHoldings + 1.0, 0.0001);
+      const buyerBaseAsset = await tracker.verifyAsset(app, realUserId, testAssetId);
+      expect(buyerBaseAsset.success).toBe(true);
+      // Expected base asset = starting (0) + gained from trade (1.0)
+      expect(buyerBaseAsset.expected).toBeCloseTo(buyerStartingBaseAsset + 1.0, 0.0001);
     });
 
-    it("should update seller portfolio state after trade", async () => {
-      const tracker = new PortfolioStateTracker();
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, realPortfolioId);
+    it("should update seller asset state after trade", async () => {
+      const tracker = new UserAssetStateTracker();
+      await tracker.registerUserFromCurrentState(app, askerUserId);
+      await tracker.registerUserFromCurrentState(app, realUserId);
 
-      // Get initial holdings before ensuring minimum
-      const initialState = tracker.getExpectedState(askerPortfolioId);
-      const initialHoldings = initialState?.startingHoldings[testMarketId] || 0;
+      // Get initial base asset before ensuring minimum
+      const initialState = tracker.getExpectedState(askerUserId);
+      const initialBaseAsset = initialState?.startingAssets[testAssetId] || 0;
 
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 1.0, tracker);
-      await TestHelpers.ensureMinimumBalance(realPortfolioId, 51000 + 10000, tracker);
+      await TestHelpers.ensureMinimumBaseAsset(askerUserId, testAssetId, 1.0, tracker);
+      await TestHelpers.ensureMinimumQuoteAsset(realUserId, usdAssetId, 51000 + 10000, tracker);
 
       // Re-register to get updated state after ensuring minimum
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-      const sellerStartingState = tracker.getExpectedState(askerPortfolioId);
-      const sellerStartingHoldings = sellerStartingState?.startingHoldings[testMarketId] || 0;
+      await tracker.registerUserFromCurrentState(app, askerUserId);
+      const sellerStartingState = tracker.getExpectedState(askerUserId);
+      const sellerStartingBaseAsset = sellerStartingState?.startingAssets[testAssetId] || 0;
 
-      // Place ask order (this reserves holdings)
-      tracker.reserveHoldings(askerPortfolioId, testMarketId, 1.0);
+      // Place ask order (this reserves base asset)
+      tracker.reserveBaseAsset(askerUserId, testAssetId, 1.0);
       await TestHelpers.placeOrder(testMarketId, {
         side: "ask",
         price: 51000,
         quantity: 1.0,
-        portfolioId: askerPortfolioId,
+        userId: askerUserId,
+        quoteAssetId: usdAssetId,
       }).expect(201);
 
       // Place matching bid order
-      tracker.reserveBalance(realPortfolioId, 51000 * 1.0);
+      tracker.reserveQuoteAsset(realUserId, usdAssetId, 51000 * 1.0);
       await TestHelpers.placeOrder(testMarketId, {
         side: "bid",
         price: 51000,
         quantity: 1.0,
-        portfolioId: realPortfolioId,
+        userId: realUserId,
+        quoteAssetId: usdAssetId,
       }).expect(201);
 
       // Record trades for both sides
-      tracker.recordTrade(askerPortfolioId, testMarketId, "ask", 51000, 1.0, true);
-      tracker.recordTrade(realPortfolioId, testMarketId, "bid", 51000, 1.0, true);
+      tracker.recordTrade(askerUserId, testAssetId, usdAssetId, "ask", 51000, 1.0, true);
+      tracker.recordTrade(realUserId, testAssetId, usdAssetId, "bid", 51000, 1.0, true);
 
-      const sellerState = await tracker.verifyPortfolio(app, askerPortfolioId);
-      expect(sellerState.balance.success).toBe(true);
-      const startingBalance = tracker.getExpectedState(askerPortfolioId)?.startingBalance || 1000000;
-      expect(sellerState.balance.expected).toBe(startingBalance + 51000);
-
-      // Verify holdings decreased by the sold quantity
-      // Note: Holdings tracking can be complex due to order placement and execution timing
-      // The key verification is that balance increased correctly (which passes above)
-      const sellerHolding = await tracker.verifyHoldings(app, askerPortfolioId, testMarketId);
+      const sellerState = await tracker.verifyUser(app, askerUserId);
+      expect(sellerState.allSuccess).toBe(true);
+      const startingQuoteAsset = sellerStartingState?.startingAssets[usdAssetId] || 1000000;
       
-      // After a fully filled ask order, holdings should decrease by the sold quantity
-      // Use a lenient tolerance to account for state tracking complexities
-      const finalState = tracker.getExpectedState(askerPortfolioId);
+      const sellerQuoteAsset = await tracker.verifyAsset(app, askerUserId, usdAssetId);
+      expect(sellerQuoteAsset.success).toBe(true);
+      expect(sellerQuoteAsset.expected).toBeCloseTo(startingQuoteAsset + 51000, 0.01);
+
+      // Verify base asset decreased by the sold quantity
+      const sellerBaseAsset = await tracker.verifyAsset(app, askerUserId, testAssetId);
+      expect(sellerBaseAsset.success).toBe(true);
+      // After a fully filled ask order, base asset should decrease by the sold quantity
       const expectedDecrease = 1.0; // Sold quantity
-      const expectedHoldingsAfterSale = sellerStartingHoldings - expectedDecrease;
-      
-      // Verify that holdings are approximately correct (within 1.0 tolerance for state tracking)
-      // The balance verification above confirms the trade executed correctly
-      expect(Math.abs(sellerHolding.actual - expectedHoldingsAfterSale)).toBeLessThanOrEqual(1.0);
+      const expectedBaseAssetAfterSale = sellerStartingBaseAsset - expectedDecrease;
+      expect(sellerBaseAsset.expected).toBeCloseTo(expectedBaseAssetAfterSale, 0.0001);
     });
 
     it("should handle partial fill restoration correctly", async () => {
-      const tracker = new PortfolioStateTracker();
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, realPortfolioId);
+      const tracker = new UserAssetStateTracker();
+      await tracker.registerUserFromCurrentState(app, askerUserId);
+      await tracker.registerUserFromCurrentState(app, realUserId);
 
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 1.2, tracker);
-      await TestHelpers.ensureMinimumBalance(realPortfolioId, 51000 + 10000, tracker);
+      await TestHelpers.ensureMinimumBaseAsset(askerUserId, testAssetId, 1.2, tracker);
+      await TestHelpers.ensureMinimumQuoteAsset(realUserId, usdAssetId, 51000 + 10000, tracker);
 
       // Place ask order
-      tracker.reserveHoldings(askerPortfolioId, testMarketId, 1.2);
+      tracker.reserveBaseAsset(askerUserId, testAssetId, 1.2);
       await TestHelpers.placeOrder(testMarketId, {
         side: "ask",
         price: 51000,
         quantity: 1.2,
-        portfolioId: askerPortfolioId,
+        userId: askerUserId,
+        quoteAssetId: usdAssetId,
       }).expect(201);
 
       // Place matching bid order (partial fill)
-      tracker.reserveBalance(realPortfolioId, 51000 * 1.0);
+      tracker.reserveQuoteAsset(realUserId, usdAssetId, 51000 * 1.0);
       await TestHelpers.placeOrder(testMarketId, {
         side: "bid",
         price: 51000,
         quantity: 1.0,
-        portfolioId: realPortfolioId,
+        userId: realUserId,
+        quoteAssetId: usdAssetId,
       }).expect(201);
 
-      tracker.recordTrade(askerPortfolioId, testMarketId, "ask", 51000, 1.0, true);
-      TestHelpers.handlePartialFillRestoration(tracker, askerPortfolioId, testMarketId, 1.2, 1.0);
+      tracker.recordTrade(askerUserId, testAssetId, usdAssetId, "ask", 51000, 1.0, true);
+      TestHelpers.handlePartialFillRestoration(tracker, askerUserId, testAssetId, 1.2, 1.0);
 
-      const sellerState = await tracker.verifyPortfolio(app, askerPortfolioId);
-      expect(sellerState.balance.success).toBe(true);
+      const sellerState = await tracker.verifyUser(app, askerUserId);
+      if (!sellerState.allSuccess) {
+        // Log which assets failed for debugging
+        for (const [assetId, result] of sellerState.assets.entries()) {
+          if (!result.success) {
+            console.log(`Asset ${assetId} verification failed: expected ${result.expected}, actual ${result.actual}, difference ${result.difference}`);
+          }
+        }
+      }
+      expect(sellerState.allSuccess).toBe(true);
     });
   });
 
   describe("Price-Time Priority", () => {
     beforeEach(async () => {
       await TestHelpers.clearOrderBook(testMarketId);
-      await TestHelpers.resetAllPortfolios();
+      await TestHelpers.resetAllUsers();
     });
 
     it("should match with first order when multiple orders have same price", async () => {
-      const tracker = new PortfolioStateTracker();
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
+      const tracker = new UserAssetStateTracker();
+      await tracker.registerUserFromCurrentState(app, askerUserId);
+      await tracker.registerUserFromCurrentState(app, bidderUserId);
 
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 2.5, tracker);
+      await TestHelpers.ensureMinimumBaseAsset(askerUserId, testAssetId, 2.5, tracker);
 
       const { orders, matchingOrder } = TestDataHelper.createPriorityTestOrders(
         testMarketId,
-        askerPortfolioId,
-        bidderPortfolioId
+        askerUserId,
+        bidderUserId,
+        usdAssetId
       );
 
       // Place orders sequentially to establish time priority
       await TestHelpers.placeOrdersSequentially(testMarketId, orders);
 
       // Place matching order
-      tracker.reserveBalance(bidderPortfolioId, matchingOrder.price * matchingOrder.quantity);
+      tracker.reserveQuoteAsset(bidderUserId, usdAssetId, matchingOrder.price * matchingOrder.quantity);
       const matchResponse = await TestHelpers.placeOrder(testMarketId, matchingOrder).expect(201);
 
       expect(matchResponse.body.matches).toHaveLength(1);
@@ -1102,16 +955,17 @@ describe("Exchange Integration (e2e)", () => {
     });
 
     it("should leave remaining order in book after partial fill", async () => {
-      const tracker = new PortfolioStateTracker();
-        await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
+      const tracker = new UserAssetStateTracker();
+      await tracker.registerUserFromCurrentState(app, askerUserId);
+      await tracker.registerUserFromCurrentState(app, bidderUserId);
 
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 2.5, tracker);
+      await TestHelpers.ensureMinimumBaseAsset(askerUserId, testAssetId, 2.5, tracker);
 
       const { orders, matchingOrder } = TestDataHelper.createPriorityTestOrders(
         testMarketId,
-        askerPortfolioId,
-        bidderPortfolioId
+        askerUserId,
+        bidderUserId,
+        usdAssetId
       );
 
       await TestHelpers.placeOrdersSequentially(testMarketId, orders);
@@ -1122,64 +976,68 @@ describe("Exchange Integration (e2e)", () => {
       expect(orderBook.asks[0].quantity).toBe(1.5);
     });
 
-    it("should update portfolio states correctly after priority match", async () => {
-      const tracker = new PortfolioStateTracker();
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
+    it("should update user asset states correctly after priority match", async () => {
+      const tracker = new UserAssetStateTracker();
+      await tracker.registerUserFromCurrentState(app, askerUserId);
+      await tracker.registerUserFromCurrentState(app, bidderUserId);
 
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 2.5, tracker);
+      await TestHelpers.ensureMinimumBaseAsset(askerUserId, testAssetId, 2.5, tracker);
 
-      // Get starting holdings for bidder (should be 0)
-      const bidderStartingState = tracker.getExpectedState(bidderPortfolioId);
-      const bidderStartingHoldings = bidderStartingState?.startingHoldings[testMarketId] || 0;
+      // Get starting base asset for bidder (should be 0)
+      const bidderStartingState = tracker.getExpectedState(bidderUserId);
+      const bidderStartingBaseAsset = bidderStartingState?.startingAssets[testAssetId] || 0;
 
       const { orders, matchingOrder } = TestDataHelper.createPriorityTestOrders(
         testMarketId,
-        askerPortfolioId,
-        bidderPortfolioId
+        askerUserId,
+        bidderUserId,
+        usdAssetId
       );
 
-      // Place ask orders and track holdings reservations
+      // Place ask orders and track base asset reservations
       for (const order of orders) {
-        tracker.reserveHoldings(askerPortfolioId, testMarketId, order.quantity);
+        tracker.reserveBaseAsset(askerUserId, testAssetId, order.quantity);
         await TestHelpers.placeOrder(testMarketId, order).expect(201);
         await new Promise(resolve => setTimeout(resolve, 10));
       }
 
-      tracker.reserveBalance(bidderPortfolioId, matchingOrder.price * matchingOrder.quantity);
+      tracker.reserveQuoteAsset(bidderUserId, usdAssetId, matchingOrder.price * matchingOrder.quantity);
       const matchResponse = await TestHelpers.placeOrder(testMarketId, matchingOrder).expect(201);
       const match = matchResponse.body.matches[0];
 
-      tracker.recordTrade(bidderPortfolioId, testMarketId, "bid", match.matchedPrice, match.matchedQuantity, true);
-      tracker.recordTrade(askerPortfolioId, testMarketId, "ask", match.matchedPrice, match.matchedQuantity, true);
+      tracker.recordTrade(bidderUserId, testAssetId, usdAssetId, "bid", match.matchedPrice, match.matchedQuantity, true);
+      tracker.recordTrade(askerUserId, testAssetId, usdAssetId, "ask", match.matchedPrice, match.matchedQuantity, true);
 
       // Handle partial fill restoration for the first ask order (1.0 filled, 0 remaining)
-      TestHelpers.handlePartialFillRestoration(tracker, askerPortfolioId, testMarketId, 1.0, 1.0);
+      TestHelpers.handlePartialFillRestoration(tracker, askerUserId, testAssetId, 1.0, 1.0);
 
-      const bidderState = await tracker.verifyPortfolio(app, bidderPortfolioId);
-      expect(bidderState.balance.success).toBe(true);
-      const bidderStartingBalance = tracker.getExpectedState(bidderPortfolioId)?.startingBalance || 1000000;
-      expect(bidderState.balance.expected).toBe(bidderStartingBalance - 50000);
+      const bidderState = await tracker.verifyUser(app, bidderUserId);
+      expect(bidderState.allSuccess).toBe(true);
+      const bidderStartingQuoteAsset = bidderStartingState?.startingAssets[usdAssetId] || 1000000;
+      
+      const bidderQuoteAsset = await tracker.verifyAsset(app, bidderUserId, usdAssetId);
+      expect(bidderQuoteAsset.success).toBe(true);
+      expect(bidderQuoteAsset.expected).toBeCloseTo(bidderStartingQuoteAsset - 50000, 0.01);
 
-      const bidderHolding = await tracker.verifyHoldings(app, bidderPortfolioId, testMarketId);
-      expect(bidderHolding.success).toBe(true);
-      // Expected holdings = starting (0) + gained from trade (1.0)
-      expect(bidderHolding.expected).toBeCloseTo(bidderStartingHoldings + 1.0, 0.0001);
+      const bidderBaseAsset = await tracker.verifyAsset(app, bidderUserId, testAssetId);
+      expect(bidderBaseAsset.success).toBe(true);
+      // Expected base asset = starting (0) + gained from trade (1.0)
+      expect(bidderBaseAsset.expected).toBeCloseTo(bidderStartingBaseAsset + 1.0, 0.0001);
     });
   });
 
   describe("Market Statistics", () => {
     beforeEach(async () => {
       await TestHelpers.clearOrderBook(testMarketId);
-      await TestCleanupHelper.resetPortfolioBalance(app, realPortfolioId, 1000000);
+      await TestCleanupHelper.resetAssetQuantity(app, realUserId, usdAssetId, 1000000);
     });
 
     it("should provide accurate market statistics", async () => {
-      const tracker = new PortfolioStateTracker();
-      await tracker.registerPortfolioFromCurrentState(app, realPortfolioId);
+      const tracker = new UserAssetStateTracker();
+      await tracker.registerUserFromCurrentState(app, realUserId);
 
-      await TestHelpers.ensureMinimumHoldings(realPortfolioId, testMarketId, 1.5, tracker);
-      await TestHelpers.ensureMinimumBalance(realPortfolioId, 100000, tracker);
+      await TestHelpers.ensureMinimumBaseAsset(realUserId, testAssetId, 1.5, tracker);
+      await TestHelpers.ensureMinimumQuoteAsset(realUserId, usdAssetId, 100000, tracker);
 
       // Execute trades
       const tradeOrders = [
@@ -1191,11 +1049,12 @@ describe("Exchange Integration (e2e)", () => {
 
       for (const order of tradeOrders) {
         if (order.side === "bid") {
-          tracker.reserveBalance(realPortfolioId, order.price * order.quantity);
+          tracker.reserveQuoteAsset(realUserId, usdAssetId, order.price * order.quantity);
         }
         await TestHelpers.placeOrder(testMarketId, {
           ...order,
-          portfolioId: realPortfolioId,
+          userId: realUserId,
+          quoteAssetId: usdAssetId,
         }).expect(201);
       }
 
@@ -1209,11 +1068,11 @@ describe("Exchange Integration (e2e)", () => {
     });
 
     it("should record all trades in trade history", async () => {
-      const tracker = new PortfolioStateTracker();
-      await tracker.registerPortfolioFromCurrentState(app, realPortfolioId);
+      const tracker = new UserAssetStateTracker();
+      await tracker.registerUserFromCurrentState(app, realUserId);
 
-      await TestHelpers.ensureMinimumHoldings(realPortfolioId, testMarketId, 1.5, tracker);
-      await TestHelpers.ensureMinimumBalance(realPortfolioId, 100000, tracker);
+      await TestHelpers.ensureMinimumBaseAsset(realUserId, testAssetId, 1.5, tracker);
+      await TestHelpers.ensureMinimumQuoteAsset(realUserId, usdAssetId, 100000, tracker);
 
       const tradeOrders = [
         { side: "ask" as const, price: 50000, quantity: 1.0 },
@@ -1224,11 +1083,12 @@ describe("Exchange Integration (e2e)", () => {
 
       for (const order of tradeOrders) {
         if (order.side === "bid") {
-          tracker.reserveBalance(realPortfolioId, order.price * order.quantity);
+          tracker.reserveQuoteAsset(realUserId, usdAssetId, order.price * order.quantity);
         }
         await TestHelpers.placeOrder(testMarketId, {
           ...order,
-          portfolioId: realPortfolioId,
+          userId: realUserId,
+          quoteAssetId: usdAssetId,
         }).expect(201);
       }
 
@@ -1253,7 +1113,8 @@ describe("Exchange Integration (e2e)", () => {
         side: "bid",
         price: -100,
         quantity: 1.0,
-        portfolioId: realPortfolioId,
+        userId: realUserId,
+        quoteAssetId: usdAssetId,
       }).expect(400);
     });
 
@@ -1262,7 +1123,8 @@ describe("Exchange Integration (e2e)", () => {
         side: "bid",
         price: 50000,
         quantity: 0,
-        portfolioId: realPortfolioId,
+        userId: realUserId,
+        quoteAssetId: usdAssetId,
       }).expect(400);
     });
 
@@ -1271,16 +1133,18 @@ describe("Exchange Integration (e2e)", () => {
         side: "invalid" as any,
         price: 50000,
         quantity: 1.0,
-        portfolioId: realPortfolioId,
+        userId: realUserId,
+        quoteAssetId: usdAssetId,
       }).expect(400);
     });
 
-    it("should reject orders with missing portfolio", async () => {
+    it("should reject orders with missing userId", async () => {
       await TestHelpers.placeOrder(testMarketId, {
         side: "bid",
         price: 50000,
         quantity: 1.0,
-        portfolioId: undefined as any,
+        userId: undefined as any,
+        quoteAssetId: usdAssetId,
       }).expect(400);
     });
 
@@ -1297,7 +1161,8 @@ describe("Exchange Integration (e2e)", () => {
         side: "bid",
         price: 50000,
         quantity: 1.0,
-        portfolioId: realPortfolioId,
+        userId: realUserId,
+        quoteAssetId: usdAssetId,
       }).expect(404);
     });
   });
@@ -1310,13 +1175,14 @@ describe("Exchange Integration (e2e)", () => {
     it("should handle concurrent order placement", async () => {
       const askOrderCount = 5;
       const totalAskQuantity = askOrderCount * 1.0;
-      await TestCleanupHelper.createTestHolding(app, realPortfolioId, testMarketId, totalAskQuantity);
+      await TestCleanupHelper.createTestAssetHolding(app, realUserId, testAssetId, totalAskQuantity);
 
       const concurrentOrders = Array.from({ length: 10 }, (_, i) => ({
         side: (i % 2 === 0 ? "bid" : "ask") as "bid" | "ask",
         price: Math.abs(50000 + (i % 2 === 0 ? -i * 10 : i * 10)),
         quantity: 1.0,
-        portfolioId: realPortfolioId,
+        userId: realUserId,
+        quoteAssetId: usdAssetId,
       }));
 
       const responses = await Promise.all(
@@ -1335,22 +1201,23 @@ describe("Exchange Integration (e2e)", () => {
   describe("Performance", () => {
     it("should handle high-frequency order placement", async () => {
       await TestHelpers.clearOrderBook(testMarketId);
-      await TestHelpers.resetAllPortfolios();
+      await TestHelpers.resetAllUsers();
 
       const startTime = Date.now();
       const orderCount = 50;
       
       const stressOrders = TestDataHelper.createStressTestData(
         testMarketId,
-        bidderPortfolioId,
+        bidderUserId,
+        usdAssetId,
         orderCount,
-        askerPortfolioId
+        askerUserId
       );
 
       const totalAskQuantity = stressOrders
         .filter(order => order.side === "ask")
         .reduce((sum, order) => sum + order.quantity, 0);
-      await TestCleanupHelper.createTestHolding(app, askerPortfolioId, testMarketId, totalAskQuantity);
+      await TestCleanupHelper.createTestAssetHolding(app, askerUserId, testAssetId, totalAskQuantity);
 
       let successCount = 0;
       for (const order of stressOrders) {
@@ -1358,7 +1225,7 @@ describe("Exchange Integration (e2e)", () => {
           await TestHelpers.placeOrder(testMarketId, order).expect(201);
           successCount++;
         } catch (error) {
-          // Some orders may fail due to portfolio constraints - this is expected in stress tests
+          // Some orders may fail due to asset constraints - this is expected in stress tests
           // Silently continue to avoid console noise
         }
       }
@@ -1380,28 +1247,29 @@ describe("Exchange Integration (e2e)", () => {
 
     it("should restore order book from database after Redis cache is cleared", async () => {
       const orderService = moduleFixture.get<OrderService>(OrderService);
-      const tracker = new PortfolioStateTracker();
-      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
+      const tracker = new UserAssetStateTracker();
+      await tracker.registerUserFromCurrentState(app, bidderUserId);
+      await tracker.registerUserFromCurrentState(app, askerUserId);
 
-      // Create holdings for ask orders
+      // Create base asset holdings for ask orders
       const totalAskQuantity = 6.7; // 1.5 + 2.0 + 3.2
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, totalAskQuantity, tracker);
+      await TestHelpers.ensureMinimumBaseAsset(askerUserId, testAssetId, totalAskQuantity, tracker);
 
       // Create market depth orders
       const { bids, asks } = TestDataHelper.createMarketDepthOrders(
         testMarketId,
-        bidderPortfolioId,
-        askerPortfolioId
+        bidderUserId,
+        askerUserId,
+        usdAssetId
       );
 
-      // Ensure sufficient balance for bid orders
+      // Ensure sufficient quote asset for bid orders
       const bidderTotalNeeded = bids.reduce((sum, bid) => sum + bid.price * bid.quantity, 0);
-      await TestHelpers.ensureMinimumBalance(bidderPortfolioId, bidderTotalNeeded + 10000, tracker);
+      await TestHelpers.ensureMinimumQuoteAsset(bidderUserId, usdAssetId, bidderTotalNeeded + 10000, tracker);
 
       // Place all orders to build up the order book
-      await TestHelpers.placeBidOrdersWithTracking(testMarketId, bids, tracker);
-      await TestHelpers.placeAskOrdersWithTracking(testMarketId, asks, tracker);
+      await TestHelpers.placeBidOrdersWithTracking(testMarketId, bids, tracker, usdAssetId);
+      await TestHelpers.placeAskOrdersWithTracking(testMarketId, asks, tracker, testAssetId);
 
       // Verify order book is populated
       const orderBookBefore = await TestHelpers.getOrderBook(testMarketId);
@@ -1437,7 +1305,7 @@ describe("Exchange Integration (e2e)", () => {
         expect(orderBookAfterRestore.bids[i].price).toBe(bidsBefore[i].price);
         expect(orderBookAfterRestore.bids[i].quantity).toBeCloseTo(bidsBefore[i].quantity, 0.0001);
         expect(orderBookAfterRestore.bids[i].side).toBe(bidsBefore[i].side);
-        expect(orderBookAfterRestore.bids[i].portfolioId).toBe(bidsBefore[i].portfolioId);
+        expect(orderBookAfterRestore.bids[i].userId).toBe(bidsBefore[i].userId);
       }
 
       // Verify each ask order matches
@@ -1445,26 +1313,27 @@ describe("Exchange Integration (e2e)", () => {
         expect(orderBookAfterRestore.asks[i].price).toBe(asksBefore[i].price);
         expect(orderBookAfterRestore.asks[i].quantity).toBeCloseTo(asksBefore[i].quantity, 0.0001);
         expect(orderBookAfterRestore.asks[i].side).toBe(asksBefore[i].side);
-        expect(orderBookAfterRestore.asks[i].portfolioId).toBe(asksBefore[i].portfolioId);
+        expect(orderBookAfterRestore.asks[i].userId).toBe(asksBefore[i].userId);
       }
     });
 
     it("should restore order book with partial fills correctly", async () => {
       const orderService = moduleFixture.get<OrderService>(OrderService);
-      const tracker = new PortfolioStateTracker();
-      await tracker.registerPortfolioFromCurrentState(app, askerPortfolioId);
-      await tracker.registerPortfolioFromCurrentState(app, bidderPortfolioId);
+      const tracker = new UserAssetStateTracker();
+      await tracker.registerUserFromCurrentState(app, askerUserId);
+      await tracker.registerUserFromCurrentState(app, bidderUserId);
 
-      // Create holdings for ask order
-      await TestHelpers.ensureMinimumHoldings(askerPortfolioId, testMarketId, 1.2, tracker);
-      await TestHelpers.ensureMinimumBalance(bidderPortfolioId, 51000 + 10000, tracker);
+      // Create base asset holdings for ask order
+      await TestHelpers.ensureMinimumBaseAsset(askerUserId, testAssetId, 1.2, tracker);
+      await TestHelpers.ensureMinimumQuoteAsset(bidderUserId, usdAssetId, 51000 + 10000, tracker);
 
       // Place ask order
       await TestHelpers.placeOrder(testMarketId, {
         side: "ask",
         price: 51000,
         quantity: 1.2,
-        portfolioId: askerPortfolioId,
+        userId: askerUserId,
+        quoteAssetId: usdAssetId,
       }).expect(201);
 
       // Place matching bid order (partial fill - 1.0 out of 1.2)
@@ -1472,7 +1341,8 @@ describe("Exchange Integration (e2e)", () => {
         side: "bid",
         price: 51000,
         quantity: 1.0,
-        portfolioId: bidderPortfolioId,
+        userId: bidderUserId,
+        quoteAssetId: usdAssetId,
       }).expect(201);
 
       // Verify order book has the partially filled ask order
@@ -1495,7 +1365,7 @@ describe("Exchange Integration (e2e)", () => {
       expect(orderBookAfterRestore.asks[0].price).toBe(askBefore.price);
       expect(orderBookAfterRestore.asks[0].quantity).toBeCloseTo(askBefore.quantity, 0.0001);
       expect(orderBookAfterRestore.asks[0].side).toBe(askBefore.side);
-      expect(orderBookAfterRestore.asks[0].portfolioId).toBe(askBefore.portfolioId);
+      expect(orderBookAfterRestore.asks[0].userId).toBe(askBefore.userId);
     });
   });
 });

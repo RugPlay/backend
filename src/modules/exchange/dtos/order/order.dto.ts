@@ -46,8 +46,14 @@ export class OrderDto {
   updatedAt: Date;
 
   @ApiProperty({
-    description: "The unique identifier of the portfolio that owns this order",
+    description: "The user ID that owns this order",
+    example: "user_123e4567-e89b-12d3-a456-426614174000",
+  })
+  userId: string;
+
+  @ApiProperty({
+    description: "The quote asset ID (for both BID and ASK orders)",
     example: "123e4567-e89b-12d3-a456-426614174000",
   })
-  portfolioId: string;
+  quoteAssetId: string;
 }

@@ -8,8 +8,7 @@ import { EventService } from "./event.service";
 import { OrderBookEntryDto } from "../dtos/order/order-book-entry.dto";
 import { OrderBookDto } from "../dtos/order/order-book.dto";
 import { TradeExecutionDto } from "../dtos/trade/trade-execution.dto";
-import { PortfolioDao } from "@/modules/portfolio/daos/portfolio.dao";
-import { HoldingDao } from "@/modules/portfolio/daos/holding.dao";
+import { AssetHoldingDao } from "@/modules/assets/daos/asset-holding.dao";
 import { MarketService } from "./market.service";
 import { BaseTransaction } from "@/database/base-transaction";
 import { Knex } from "knex";
@@ -21,7 +20,6 @@ import { BatchOrderOperationDto } from "../dtos/order/batch-order-operation.dto"
 import { BatchCreateTradeDto } from "../dtos/trade/batch-create-trade.dto";
 import { TradeType } from "../types/trade-type";
 import {
-  InvalidPortfolioIdException,
   OrderCreationFailedException,
 } from "../exceptions";
 import { HttpException } from "@nestjs/common";
@@ -38,8 +36,7 @@ export class OrderService implements OnModuleInit {
     private readonly orderDao: OrderDao,
     private readonly tradeDao: TradeDao,
     private readonly eventService: EventService,
-    private readonly portfolioDao: PortfolioDao,
-    private readonly holdingDao: HoldingDao,
+    private readonly assetHoldingDao: AssetHoldingDao,
     private readonly marketService: MarketService,
   ) {}
 
@@ -117,9 +114,16 @@ export class OrderService implements OnModuleInit {
     order: Omit<OrderBookEntryDto, "timestamp">,
   ): Promise<OrderMatchingResultDto> {
     try {
-      // Validate portfolio ID format before processing
-      if (!this.isValidUuid(order.portfolioId)) {
-        throw new InvalidPortfolioIdException(order.portfolioId);
+      // Validate user ID format before processing
+      if (!order.userId) {
+        throw new HttpException(
+          {
+            statusCode: 400,
+            message: "User ID is required",
+            error: "Bad Request",
+          },
+          400,
+        );
       }
 
       // First, save the incoming order to the database so it has a valid ID for trades
@@ -175,36 +179,37 @@ export class OrderService implements OnModuleInit {
         );
       }
 
-      // Validate and reserve holdings/balance before creating order
+      // Validate and reserve assets before creating order
       if (order.side === "ask") {
-        // For ASK orders (selling), need to reserve base currency holdings
-        const reserved = await this.holdingDao.reserveHolding(
-          order.portfolioId,
-          marketId,
+        // For ASK orders (selling), need to reserve base asset holdings
+        const reserved = await this.assetHoldingDao.reserveAsset(
+          order.userId,
+          market.baseAssetId,
           order.quantity,
         );
         if (!reserved) {
           throw new HttpException(
             {
               statusCode: 400,
-              message: `Insufficient holdings. You need ${order.quantity} ${market.baseCurrency} to place this sell order.`,
+              message: `Insufficient holdings. You need ${order.quantity} ${market.baseAsset} to place this sell order.`,
               error: "Bad Request",
             },
             400,
           );
         }
       } else {
-        // For BID orders (buying), need to reserve quote currency balance
+        // For BID orders (buying), need to reserve quote asset holdings
         const totalCost = order.price * order.quantity;
-        const reserved = await this.portfolioDao.reserveBalance(
-          order.portfolioId,
+        const reserved = await this.assetHoldingDao.reserveAsset(
+          order.userId,
+          market.quoteAssetId,
           totalCost,
         );
         if (!reserved) {
           throw new HttpException(
             {
               statusCode: 400,
-              message: `Insufficient balance. You need ${totalCost} ${market.quoteCurrency} to place this buy order.`,
+              message: `Insufficient balance. You need ${totalCost} ${market.quoteAsset} to place this buy order.`,
               error: "Bad Request",
             },
             400,
@@ -216,17 +221,18 @@ export class OrderService implements OnModuleInit {
       try {
         savedTakerOrderId = await this.orderDao.createOrder(orderWithTimestamp);
       } catch (error: any) {
-        // If order creation fails, restore the reserved holdings/balance
+        // If order creation fails, restore the reserved assets
         if (order.side === "ask") {
-          await this.holdingDao.adjustHoldingQuantity(
-            order.portfolioId,
-            marketId,
+          await this.assetHoldingDao.adjustAssetQuantity(
+            order.userId,
+            market.baseAssetId,
             order.quantity, // Restore by adding back
           );
         } else {
           const totalCost = order.price * order.quantity;
-          await this.portfolioDao.adjustBalanceByPortfolioId(
-            order.portfolioId,
+          await this.assetHoldingDao.adjustAssetQuantity(
+            order.userId,
+            market.quoteAssetId,
             totalCost, // Restore by adding back
           );
         }
@@ -246,17 +252,18 @@ export class OrderService implements OnModuleInit {
       }
       
       if (!savedTakerOrderId) {
-        // If order creation failed, restore the reserved holdings/balance
+        // If order creation failed, restore the reserved assets
         if (order.side === "ask") {
-          await this.holdingDao.adjustHoldingQuantity(
-            order.portfolioId,
-            marketId,
+          await this.assetHoldingDao.adjustAssetQuantity(
+            order.userId,
+            market.baseAssetId,
             order.quantity, // Restore by adding back
           );
         } else {
           const totalCost = order.price * order.quantity;
-          await this.portfolioDao.adjustBalanceByPortfolioId(
-            order.portfolioId,
+          await this.assetHoldingDao.adjustAssetQuantity(
+            order.userId,
+            market.quoteAssetId,
             totalCost, // Restore by adding back
           );
         }
@@ -281,7 +288,8 @@ export class OrderService implements OnModuleInit {
         side: dbOrder.side,
         timestamp: dbOrder.createdAt,
         orderId: dbOrder.id,
-        portfolioId: dbOrder.portfolioId,
+        userId: dbOrder.userId,
+        quoteAssetId: dbOrder.quoteAssetId,
       }));
 
       // Calculate matches between the incoming order and existing orders
@@ -310,21 +318,27 @@ export class OrderService implements OnModuleInit {
             quantity: remainingQuantity,
           };
 
-          // Restore holdings/balance for the unfilled portion
-          if (order.side === "ask") {
-            // Restore holdings for unfilled quantity
-            await this.holdingDao.adjustHoldingQuantity(
-              order.portfolioId,
-              marketId,
-              remainingQuantity, // Restore by adding back
-            );
-          } else {
-            // Restore balance for unfilled quantity
-            const remainingCost = order.price * remainingQuantity;
-            await this.portfolioDao.adjustBalanceByPortfolioId(
-              order.portfolioId,
-              remainingCost, // Restore by adding back
-            );
+          // Only restore assets for the unfilled portion if there were some matches
+          // If there were no matches (totalMatched === 0), the order is being added to the order book
+          // and the assets should stay reserved (deducted)
+          if (totalMatched > 0) {
+            // Restore assets for the unfilled portion (partial fill scenario)
+            if (order.side === "ask") {
+              // Restore base asset holdings for unfilled quantity
+              await this.assetHoldingDao.adjustAssetQuantity(
+                order.userId,
+                market.baseAssetId,
+                remainingQuantity, // Restore by adding back
+              );
+            } else {
+              // Restore quote asset holdings for unfilled quantity
+              const remainingCost = order.price * remainingQuantity;
+              await this.assetHoldingDao.adjustAssetQuantity(
+                order.userId,
+                market.quoteAssetId,
+                remainingCost, // Restore by adding back
+              );
+            }
           }
 
           // Update Redis after successful database commit
@@ -426,87 +440,86 @@ export class OrderService implements OnModuleInit {
     }
 
     for (const match of calculatedMatches) {
-      // Get maker order to determine maker side
+      // Get maker order to determine maker side and userId
       const makerOrder = await this.orderDao.getOrderById(match.matchedOrderId);
       if (!makerOrder) {
         this.logger.error(`Maker order ${match.matchedOrderId} not found`);
         continue;
       }
 
-      // Get user IDs from portfolios for filtering and holding creation
-      const takerPortfolio = await this.portfolioDao.getPortfolioById(order.portfolioId);
-      const makerPortfolio = await this.portfolioDao.getPortfolioById(match.matchedPortfolioId);
-
-      // Get or create holdings for both taker and maker (pass userId for efficiency)
-      const takerHoldingId = await this.holdingDao.getOrCreateHoldingId(
-        order.portfolioId,
-        marketId,
-        takerPortfolio?.userId,
+      // Get or create holdings for both taker and maker
+      const takerBaseHoldingId = await this.assetHoldingDao.getOrCreateAssetId(
+        order.userId,
+        market.baseAssetId,
       );
-      const makerHoldingId = await this.holdingDao.getOrCreateHoldingId(
-        match.matchedPortfolioId,
-        marketId,
-        makerPortfolio?.userId,
+      const takerQuoteHoldingId = await this.assetHoldingDao.getOrCreateAssetId(
+        order.userId,
+        market.quoteAssetId,
+      );
+      const makerBaseHoldingId = await this.assetHoldingDao.getOrCreateAssetId(
+        makerOrder.userId,
+        market.baseAssetId,
+      );
+      const makerQuoteHoldingId = await this.assetHoldingDao.getOrCreateAssetId(
+        makerOrder.userId,
+        market.quoteAssetId,
       );
 
       // Update holdings/balances based on trade
       const tradeValue = match.price * match.quantity;
 
       if (order.side === "bid") {
-        // Taker is buying: Holdings were already reserved, now add holdings
-        // Holdings were already deducted from reservation, so we need to add them back plus the purchased amount
-        // Actually, for BID orders, balance was reserved, not holdings
-        // So: balance was deducted, now add holdings
-        await this.holdingDao.adjustHoldingQuantity(
-          order.portfolioId,
-          marketId,
-          match.quantity, // Add purchased holdings
+        // Taker is buying: Quote asset was reserved, now add base asset holdings
+        await this.assetHoldingDao.adjustAssetQuantity(
+          order.userId,
+          market.baseAssetId,
+          match.quantity, // Add purchased base asset
         );
         // Update cost basis for taker (buyer)
-        await this.holdingDao.updateCostBasisOnPurchase(
-          order.portfolioId,
-          marketId,
+        await this.assetHoldingDao.updateCostBasisOnPurchase(
+          order.userId,
+          market.baseAssetId,
           match.quantity,
           match.price,
         );
 
-        // Maker is selling: Add cash (quote currency balance)
-        await this.portfolioDao.adjustBalanceByPortfolioId(
-          match.matchedPortfolioId,
-          tradeValue, // Add cash from sale
+        // Maker is selling: Add quote asset (cash) from sale
+        await this.assetHoldingDao.adjustAssetQuantity(
+          makerOrder.userId,
+          market.quoteAssetId,
+          tradeValue, // Add quote asset from sale
         );
         // Update cost basis for maker (seller) - reduce cost basis proportionally
-        await this.holdingDao.updateCostBasisOnSale(
-          match.matchedPortfolioId,
-          marketId,
+        await this.assetHoldingDao.updateCostBasisOnSale(
+          makerOrder.userId,
+          market.baseAssetId,
           match.quantity,
         );
       } else {
-        // Taker is selling: Holdings were already reserved (deducted) when order was placed
-        // The holdings are already gone, so we just add cash from the sale
-        await this.portfolioDao.adjustBalanceByPortfolioId(
-          order.portfolioId,
-          tradeValue, // Add cash from sale
+        // Taker is selling: Base asset was reserved (deducted) when order was placed
+        // Now add quote asset from the sale
+        await this.assetHoldingDao.adjustAssetQuantity(
+          order.userId,
+          market.quoteAssetId,
+          tradeValue, // Add quote asset from sale
         );
         // Update cost basis for taker (seller) - reduce cost basis proportionally
-        await this.holdingDao.updateCostBasisOnSale(
-          order.portfolioId,
-          marketId,
+        await this.assetHoldingDao.updateCostBasisOnSale(
+          order.userId,
+          market.baseAssetId,
           match.quantity,
         );
 
-        // Maker is buying: Add holdings (base currency) to the maker's portfolio
-        // Note: If maker and taker are the same portfolio, this will add back what was deducted
-        // which is correct - they sold and bought back, so net holdings should be unchanged
-        await this.holdingDao.adjustHoldingQuantity(
-          match.matchedPortfolioId,
-          marketId,
-          match.quantity, // Add purchased holdings
+        // Maker is buying: Add base asset holdings
+        await this.assetHoldingDao.adjustAssetQuantity(
+          makerOrder.userId,
+          market.baseAssetId,
+          match.quantity, // Add purchased base asset
         );
         // Update cost basis for maker (buyer)
-        await this.holdingDao.updateCostBasisOnPurchase(
-          match.matchedPortfolioId,
-          marketId,
+        await this.assetHoldingDao.updateCostBasisOnPurchase(
+          makerOrder.userId,
+          market.baseAssetId,
           match.quantity,
           match.price,
         );
@@ -518,16 +531,15 @@ export class OrderService implements OnModuleInit {
         marketId,
         takerOrderId: order.orderId,
         makerOrderId: match.matchedOrderId,
+        takerSide: order.side,
         price: match.price,
         quantity: match.quantity,
         type: "real" as TradeType,
         timestamp: new Date(),
-        takerHoldingId: takerHoldingId || undefined,
-        makerHoldingId: makerHoldingId || undefined,
-        takerUserId: takerPortfolio?.userId,
-        makerUserId: makerPortfolio?.userId,
-        takerPortfolioId: order.portfolioId,
-        makerPortfolioId: match.matchedPortfolioId,
+        takerHoldingId: takerBaseHoldingId || undefined,
+        makerHoldingId: makerBaseHoldingId || undefined,
+        takerUserId: order.userId,
+        makerUserId: makerOrder.userId,
       };
 
       const tradeResult = await this.tradeDao.createTrade(tradeExecution);
@@ -673,19 +685,20 @@ export class OrderService implements OnModuleInit {
             // Order is partially matched - update quantity in database
             await this.orderDao.updateOrderQuantity(match.makerOrderId, remainingQuantity);
             
-            // Restore holdings/balance for the unfilled portion of maker order
+            // Restore assets for the unfilled portion of maker order
             if (orderData.side === "ask") {
-              // Restore holdings for unfilled quantity
-              await this.holdingDao.adjustHoldingQuantity(
-                orderData.portfolioId,
-                marketId,
+              // Restore base asset holdings for unfilled quantity
+              await this.assetHoldingDao.adjustAssetQuantity(
+                orderData.userId,
+                market.baseAssetId,
                 remainingQuantity, // Restore by adding back
               );
             } else {
-              // Restore balance for unfilled quantity
+              // Restore quote asset holdings for unfilled quantity
               const remainingCost = orderData.price * remainingQuantity;
-              await this.portfolioDao.adjustBalanceByPortfolioId(
-                orderData.portfolioId,
+              await this.assetHoldingDao.adjustAssetQuantity(
+                orderData.userId,
+                market.quoteAssetId,
                 remainingCost, // Restore by adding back
               );
             }
@@ -741,7 +754,8 @@ export class OrderService implements OnModuleInit {
             side,
             timestamp: new Date(),
             orderId: `aggregated-${marketId}-${side}-${price}`,
-            portfolioId: "aggregated",
+            userId: "aggregated",
+            quoteAssetId: "aggregated",
           });
         }
       }
@@ -816,7 +830,8 @@ export class OrderService implements OnModuleInit {
           side: "bid",
           timestamp: new Date(),
           orderId: `best-bid-${marketId}`,
-          portfolioId: "aggregated",
+          userId: "aggregated",
+          quoteAssetId: "aggregated",
         };
       }
       
@@ -847,7 +862,8 @@ export class OrderService implements OnModuleInit {
           side: "ask",
           timestamp: new Date(),
           orderId: `best-ask-${marketId}`,
-          portfolioId: "aggregated",
+          userId: "aggregated",
+          quoteAssetId: "aggregated",
         };
       }
       
@@ -901,19 +917,20 @@ export class OrderService implements OnModuleInit {
         return false;
       }
 
-      // Restore holdings/balance for the remaining order quantity
+      // Restore assets for the remaining order quantity
       if (side === "ask") {
-        // Restore holdings for ASK orders (selling)
-        await this.holdingDao.adjustHoldingQuantity(
-          orderData.portfolioId,
-          marketId,
+        // Restore base asset holdings for ASK orders (selling)
+        await this.assetHoldingDao.adjustAssetQuantity(
+          orderData.userId,
+          market.baseAssetId,
           orderData.quantity, // Restore by adding back
         );
       } else {
-        // Restore balance for BID orders (buying)
+        // Restore quote asset holdings for BID orders (buying)
         const totalCost = orderData.price * orderData.quantity;
-        await this.portfolioDao.adjustBalanceByPortfolioId(
-          orderData.portfolioId,
+        await this.assetHoldingDao.adjustAssetQuantity(
+          orderData.userId,
+          market.quoteAssetId,
           totalCost, // Restore by adding back
         );
       }
@@ -961,8 +978,6 @@ export class OrderService implements OnModuleInit {
         createdAt: trade.createdAt, // Also include createdAt for backward compatibility
         takerUserId: trade.takerUserId,
         makerUserId: trade.makerUserId,
-        takerPortfolioId: trade.takerPortfolioId,
-        makerPortfolioId: trade.makerPortfolioId,
       }));
     } catch (error) {
       this.logger.error(`Error getting recent trades for market ${marketId}:`, error);
@@ -1062,20 +1077,21 @@ export class OrderService implements OnModuleInit {
         return false;
       }
 
-      // Restore balance for all BID orders (buying orders that reserved balance)
+      // Restore quote asset holdings for all BID orders (buying orders that reserved quote asset)
       for (const order of bidOrders) {
         const totalCost = order.price * order.quantity;
-        await this.portfolioDao.adjustBalanceByPortfolioId(
-          order.portfolioId,
+        await this.assetHoldingDao.adjustAssetQuantity(
+          order.userId,
+          market.quoteAssetId,
           totalCost, // Restore by adding back
         );
       }
 
-      // Restore holdings for all ASK orders (selling orders that reserved holdings)
+      // Restore base asset holdings for all ASK orders (selling orders that reserved base asset)
       for (const order of askOrders) {
-        await this.holdingDao.adjustHoldingQuantity(
-          order.portfolioId,
-          marketId,
+        await this.assetHoldingDao.adjustAssetQuantity(
+          order.userId,
+          market.baseAssetId,
           order.quantity, // Restore by adding back
         );
       }
@@ -1116,7 +1132,7 @@ export class OrderService implements OnModuleInit {
    * - Match quantity is the minimum of the remaining quantities
    * - Orders are matched in price-time priority (best price first, then earliest time)
    * 
-   * @returns Array of matches, each containing the matched order ID, portfolio ID, price, and quantity
+   * @returns Array of matches, each containing the matched order ID, user ID, price, and quantity
    */
   private calculateMatches(
     incomingOrder: Omit<OrderBookEntryDto, "timestamp">,
@@ -1139,7 +1155,7 @@ export class OrderService implements OnModuleInit {
         const matchQuantity = Math.min(remainingQuantity, existingOrder.quantity);
         matches.push({
           matchedOrderId: existingOrder.orderId,
-          matchedPortfolioId: existingOrder.portfolioId,
+          matchedUserId: existingOrder.userId,
           price: existingOrder.price, // Use maker's price (price-time priority)
           quantity: matchQuantity,
         });
@@ -1172,7 +1188,8 @@ export class OrderService implements OnModuleInit {
         timestamp: order.createdAt,
         orderId: order.id,
         side: order.side,
-        portfolioId: order.portfolioId,
+        userId: order.userId,
+        quoteAssetId: order.quoteAssetId,
       }));
     } catch (error) {
       this.logger.error("Error getting opposing orders:", error);

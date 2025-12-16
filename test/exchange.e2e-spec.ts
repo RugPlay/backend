@@ -9,8 +9,10 @@ import { TestCleanupHelper } from "./helpers/test-cleanup.helper";
 describe("Exchange (e2e)", () => {
   let app: INestApplication;
   let testMarketId: string;
-  let testPortfolioId1: string;
-  let testPortfolioId2: string;
+  let testUserId1: string;
+  let testUserId2: string;
+  let usdAssetId: string;
+  let btcAssetId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -35,17 +37,28 @@ describe("Exchange (e2e)", () => {
   });
 
   async function setupTestData() {
-    // Create test portfolios using the test helper
-    testPortfolioId1 = await TestCleanupHelper.createTestPortfolio(app, uuidv4(), 1000000);
-    testPortfolioId2 = await TestCleanupHelper.createTestPortfolio(app, uuidv4(), 1000000);
+    // Create test user IDs
+    testUserId1 = uuidv4();
+    testUserId2 = uuidv4();
+
+    // Create test assets
+    const assets = await TestCleanupHelper.createTestAssets(app);
+    usdAssetId = assets.usdAssetId;
+    btcAssetId = assets.btcAssetId;
+
+    // Give users initial USD holdings for trading
+    await TestCleanupHelper.createTestAssetHolding(app, testUserId1, usdAssetId, 1000000);
+    await TestCleanupHelper.createTestAssetHolding(app, testUserId2, usdAssetId, 1000000);
 
     // Create a test market
     const marketData = {
       name: "Test Bitcoin Market",
       symbol: "BTC/USD",
       category: "crypto",
-      baseCurrency: "BTC",
-      quoteCurrency: "USD",
+      baseAsset: "BTC",
+      quoteAsset: "USD",
+      baseAssetId: btcAssetId,
+      quoteAssetId: usdAssetId,
       minPriceIncrement: 0.01,
       minQuantityIncrement: 0.001,
       maxQuantity: 100,
@@ -64,12 +77,26 @@ describe("Exchange (e2e)", () => {
 
   describe("Market Creation", () => {
     it("should create a new market", async () => {
+      // Create ETH asset first
+      const ethAssetResponse = await request(app.getHttpServer())
+        .post("/assets")
+        .send({
+          symbol: "ETH",
+          name: "Ethereum",
+          type: "crypto",
+          decimals: 8,
+          isActive: true,
+        })
+        .expect(201);
+
       const marketData = {
         name: "Test Ethereum Market",
         symbol: "ETH/USD",
         category: "crypto",
-        baseCurrency: "ETH",
-        quoteCurrency: "USD",
+        baseAsset: "ETH",
+        quoteAsset: "USD",
+        baseAssetId: ethAssetResponse.body.id,
+        quoteAssetId: usdAssetId,
         minPriceIncrement: 0.01,
         minQuantityIncrement: 0.001,
         maxQuantity: 1000,
@@ -87,6 +114,8 @@ describe("Exchange (e2e)", () => {
         name: marketData.name,
         symbol: marketData.symbol,
         category: marketData.category,
+        baseAsset: "ETH",
+        quoteAsset: "USD",
         isActive: true,
       });
       expect(response.body.id).toBeDefined();
@@ -148,7 +177,8 @@ describe("Exchange (e2e)", () => {
         side: "bid" as const,
         price: 50000,
         quantity: 1.5,
-        portfolioId: testPortfolioId1,
+        userId: testUserId1,
+        quoteAssetId: usdAssetId,
       };
 
       const response = await request(app.getHttpServer())
@@ -166,19 +196,20 @@ describe("Exchange (e2e)", () => {
         side: "bid",
         price: 50000,
         quantity: 1.5,
-        portfolioId: testPortfolioId1,
+        userId: testUserId1,
       });
     });
 
     it("should place a sell order (ask) without matching", async () => {
-      // Create holdings for ASK order
-      await TestCleanupHelper.createTestHolding(app, testPortfolioId2, testMarketId, 2.0);
+      // Create base asset holdings for ASK order
+      await TestCleanupHelper.createTestAssetHolding(app, testUserId2, btcAssetId, 2.0);
 
       const orderData = {
         side: "ask" as const,
         price: 51000,
         quantity: 2.0,
-        portfolioId: testPortfolioId2,
+        userId: testUserId2,
+        quoteAssetId: usdAssetId,
       };
 
       const response = await request(app.getHttpServer())
@@ -196,7 +227,7 @@ describe("Exchange (e2e)", () => {
         side: "ask",
         price: 51000,
         quantity: 2.0,
-        portfolioId: testPortfolioId2,
+        userId: testUserId2,
       });
     });
 
@@ -226,13 +257,15 @@ describe("Exchange (e2e)", () => {
           side: "bid" as const,
           price: 49500,
           quantity: 1.0,
-          portfolioId: testPortfolioId1,
+          userId: testUserId1,
+          quoteAssetId: usdAssetId,
         },
         {
           side: "bid" as const,
           price: 49000,
           quantity: 2.0,
-          portfolioId: testPortfolioId1,
+          userId: testUserId1,
+          quoteAssetId: usdAssetId,
         },
       ];
 
@@ -242,22 +275,24 @@ describe("Exchange (e2e)", () => {
           side: "ask" as const,
           price: 51500,
           quantity: 1.5,
-          portfolioId: testPortfolioId2,
+          userId: testUserId2,
+          quoteAssetId: usdAssetId,
         },
         {
           side: "ask" as const,
           price: 52000,
           quantity: 3.0,
-          portfolioId: testPortfolioId2,
+          userId: testUserId2,
+          quoteAssetId: usdAssetId,
         },
       ];
 
-      // Create holdings for new ASK orders
+      // Create base asset holdings for new ASK orders
       // Note: The previous test already reserved 2.0 holdings for the existing ASK order
       // So we need to create additional holdings for the new orders (1.5 + 3.0 = 4.5)
       // Plus we need to account for the already reserved 2.0, so total needed is 6.5
       const totalAskQuantity = 2.0 + 1.5 + 3.0; // Reserved from previous test + new orders
-      await TestCleanupHelper.createTestHolding(app, testPortfolioId2, testMarketId, totalAskQuantity);
+      await TestCleanupHelper.createTestAssetHolding(app, testUserId2, btcAssetId, totalAskQuantity);
 
       // Place all buy orders
       for (const order of buyOrders) {
@@ -298,7 +333,8 @@ describe("Exchange (e2e)", () => {
         side: "bid" as const,
         price: 51000, // This should match with the ask at 51000
         quantity: 1.0, // Partial fill of the 2.0 ask
-        portfolioId: testPortfolioId1,
+        userId: testUserId1,
+        quoteAssetId: usdAssetId,
       };
 
       const response = await request(app.getHttpServer())
@@ -344,7 +380,8 @@ describe("Exchange (e2e)", () => {
         side: "bid" as const,
         price: 51000,
         quantity: 1.0, // This should completely fill the remaining 1.0 ask
-        portfolioId: testPortfolioId1,
+        userId: testUserId1,
+        quoteAssetId: usdAssetId,
       };
 
       const response = await request(app.getHttpServer())
@@ -421,7 +458,8 @@ describe("Exchange (e2e)", () => {
         side: "invalid",
         price: -100,
         quantity: 0,
-        portfolioId: testPortfolioId1,
+        userId: testUserId1,
+        quoteAssetId: usdAssetId,
       };
 
       await request(app.getHttpServer())
@@ -436,7 +474,8 @@ describe("Exchange (e2e)", () => {
         side: "bid" as const,
         price: 50000,
         quantity: 1.0,
-        portfolioId: testPortfolioId1,
+        userId: testUserId1,
+        quoteAssetId: usdAssetId,
       };
 
       await request(app.getHttpServer())

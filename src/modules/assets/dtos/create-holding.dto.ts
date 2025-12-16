@@ -6,3 +6,4 @@ export class CreateHoldingDto extends OmitType(HoldingDto, [
   "createdAt",
   "updatedAt",
 ] as const) {}
+

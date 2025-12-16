@@ -42,16 +42,28 @@ export class MarketDto {
   subcategory?: string;
 
   @ApiProperty({
-    description: "Base currency code",
+    description: "Base asset symbol",
     example: "BTC",
   })
-  baseCurrency: string;
+  baseAsset: string;
 
   @ApiProperty({
-    description: "Quote currency code",
+    description: "Quote asset symbol",
     example: "USD",
   })
-  quoteCurrency: string;
+  quoteAsset: string;
+
+  @ApiProperty({
+    description: "Base asset ID",
+    example: "123e4567-e89b-12d3-a456-426614174000",
+  })
+  baseAssetId: string;
+
+  @ApiProperty({
+    description: "Quote asset ID",
+    example: "123e4567-e89b-12d3-a456-426614174001",
+  })
+  quoteAssetId: string;
 
   @ApiProperty({
     description: "Minimum price increment",

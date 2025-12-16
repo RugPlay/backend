@@ -1,4 +1,3 @@
-export * from "./invalid-portfolio-id.exception";
 export * from "./order-creation-failed.exception";
 export * from "./market-not-found.exception";
 export * from "./invalid-order-data.exception";

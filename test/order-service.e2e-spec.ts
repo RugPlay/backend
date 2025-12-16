@@ -2,7 +2,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { INestApplication } from "@nestjs/common";
 import { OrderService } from "../src/modules/exchange/services/order.service";
 import { MarketService } from "../src/modules/exchange/services/market.service";
-import { PortfolioService } from "../src/modules/portfolio/services/portfolio.service";
+import { AssetService } from "../src/modules/assets/services/asset.service";
 import { AppModule } from "../src/app.module";
 import { v4 as uuidv4 } from "uuid";
 import { TestCleanupHelper } from "./helpers/test-cleanup.helper";
@@ -12,9 +12,11 @@ describe("OrderService (e2e)", () => {
   let app: INestApplication;
   let orderService: OrderService;
   let marketService: MarketService;
-  let portfolioService: PortfolioService;
+  let assetService: AssetService;
   let testMarketId: string;
-  let realPortfolioId: string;
+  let testUserId: string;
+  let usdAssetId: string;
+  let testAssetId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -28,7 +30,7 @@ describe("OrderService (e2e)", () => {
 
     orderService = moduleFixture.get<OrderService>(OrderService);
     marketService = moduleFixture.get<MarketService>(MarketService);
-    portfolioService = moduleFixture.get<PortfolioService>(PortfolioService);
+    assetService = moduleFixture.get<AssetService>(AssetService);
 
     await setupTestData();
   });
@@ -42,13 +44,40 @@ describe("OrderService (e2e)", () => {
   });
 
   async function setupTestData() {
+    // Create test user ID
+    testUserId = uuidv4();
+
+    // Create test assets
+    const usdAsset = await assetService.createAsset({
+      symbol: "USD",
+      name: "US Dollar",
+      type: "currency",
+      decimals: 2,
+      isActive: true,
+    });
+    usdAssetId = usdAsset.id;
+
+    const testAsset = await assetService.createAsset({
+      symbol: "TEST",
+      name: "Test Asset",
+      type: "crypto",
+      decimals: 8,
+      isActive: true,
+    });
+    testAssetId = testAsset.id;
+
+    // Give user initial USD holdings for trading
+    await TestCleanupHelper.createTestAssetHolding(app, testUserId, usdAssetId, 1000000);
+
     // Create a test market
     const market = await marketService.createMarket({
       name: "Test Order Service Market",
       symbol: "TEST/USD",
       category: "crypto",
-      baseCurrency: "TEST",
-      quoteCurrency: "USD",
+      baseAsset: "TEST",
+      quoteAsset: "USD",
+      baseAssetId: testAssetId,
+      quoteAssetId: usdAssetId,
       minPriceIncrement: 0.01,
       minQuantityIncrement: 0.001,
       maxQuantity: 100,
@@ -61,9 +90,6 @@ describe("OrderService (e2e)", () => {
       throw new Error("Failed to create test market");
     }
     testMarketId = market.id;
-
-    // Mock portfolio IDs (in a real test, you'd create actual portfolios)
-    realPortfolioId = await TestCleanupHelper.createTestPortfolio(app, uuidv4(), 1000000);
   }
 
   describe("Order Book Management", () => {
@@ -97,7 +123,8 @@ describe("OrderService (e2e)", () => {
         side: "bid",
         price: 50000,
         quantity: 1.5,
-        portfolioId: realPortfolioId,
+        userId: testUserId,
+        quoteAssetId: usdAssetId,
       };
 
       const orderWithTimestamp = { ...order, timestamp: new Date() };
@@ -115,13 +142,17 @@ describe("OrderService (e2e)", () => {
     });
 
     it("should add a sell order to the order book", async () => {
+      // Create base asset holdings for ASK order
+      await TestCleanupHelper.createTestAssetHolding(app, testUserId, testAssetId, 2.0);
+
       const order: Omit<OrderBookEntryDto, "timestamp"> = {
         marketId: testMarketId,
         orderId: uuidv4(),
         side: "ask",
         price: 51000,
         quantity: 2.0,
-        portfolioId: realPortfolioId,
+        userId: testUserId,
+        quoteAssetId: usdAssetId,
       };
 
       const orderWithTimestamp = { ...order, timestamp: new Date() };
@@ -146,8 +177,8 @@ describe("OrderService (e2e)", () => {
     });
 
     it("should match orders with exact price and quantity", async () => {
-      // Create holdings for the ask order
-      await TestCleanupHelper.createTestHolding(app, realPortfolioId, testMarketId, 1.0);
+      // Create base asset holdings for the ask order
+      await TestCleanupHelper.createTestAssetHolding(app, testUserId, testAssetId, 1.0);
 
       // Add a sell order first (using addOrderWithMatching so it's saved to database)
       const sellOrder: Omit<OrderBookEntryDto, "timestamp"> = {
@@ -156,7 +187,8 @@ describe("OrderService (e2e)", () => {
         side: "ask",
         price: 50000,
         quantity: 1.0,
-        portfolioId: realPortfolioId,
+        userId: testUserId,
+        quoteAssetId: usdAssetId,
       };
 
       const sellResult = await orderService.addOrderWithMatching(testMarketId, sellOrder);
@@ -170,7 +202,8 @@ describe("OrderService (e2e)", () => {
         side: "bid",
         price: 50000,
         quantity: 1.0,
-        portfolioId: realPortfolioId,
+        userId: testUserId,
+        quoteAssetId: usdAssetId,
       };
 
       const matchResult = await orderService.addOrderWithMatching(testMarketId, buyOrder);
@@ -188,8 +221,8 @@ describe("OrderService (e2e)", () => {
     });
 
     it("should handle partial fills", async () => {
-      // Create holdings for the ask order
-      await TestCleanupHelper.createTestHolding(app, realPortfolioId, testMarketId, 5.0);
+      // Create base asset holdings for the ask order
+      await TestCleanupHelper.createTestAssetHolding(app, testUserId, testAssetId, 5.0);
 
       // Add a large sell order (using addOrderWithMatching so it's saved to database)
       const sellOrder: Omit<OrderBookEntryDto, "timestamp"> = {
@@ -198,7 +231,8 @@ describe("OrderService (e2e)", () => {
         side: "ask",
         price: 50000,
         quantity: 5.0,
-        portfolioId: realPortfolioId,
+        userId: testUserId,
+        quoteAssetId: usdAssetId,
       };
 
       const sellResult = await orderService.addOrderWithMatching(testMarketId, sellOrder);
@@ -212,7 +246,8 @@ describe("OrderService (e2e)", () => {
         side: "bid",
         price: 50000,
         quantity: 2.0,
-        portfolioId: realPortfolioId,
+        userId: testUserId,
+        quoteAssetId: usdAssetId,
       };
 
       const matchResult = await orderService.addOrderWithMatching(testMarketId, buyOrder);
@@ -227,8 +262,8 @@ describe("OrderService (e2e)", () => {
     });
 
     it("should handle multiple matches", async () => {
-      // Create holdings for the ask orders (1.0 + 1.5 = 2.5)
-      await TestCleanupHelper.createTestHolding(app, realPortfolioId, testMarketId, 2.5);
+      // Create base asset holdings for the ask orders (1.0 + 1.5 = 2.5)
+      await TestCleanupHelper.createTestAssetHolding(app, testUserId, testAssetId, 2.5);
 
       // Add multiple sell orders at the same price (using addOrderWithMatching so they're saved to database)
       const sellOrders = [
@@ -238,7 +273,8 @@ describe("OrderService (e2e)", () => {
           side: "ask" as const,
           price: 50000,
           quantity: 1.0,
-          portfolioId: realPortfolioId,
+          userId: testUserId,
+          quoteAssetId: usdAssetId,
         },
         {
           marketId: testMarketId,
@@ -246,7 +282,8 @@ describe("OrderService (e2e)", () => {
           side: "ask" as const,
           price: 50000,
           quantity: 1.5,
-          portfolioId: realPortfolioId,
+          userId: testUserId,
+          quoteAssetId: usdAssetId,
         },
       ];
 
@@ -264,7 +301,8 @@ describe("OrderService (e2e)", () => {
         side: "bid",
         price: 50000,
         quantity: 2.5,
-        portfolioId: realPortfolioId,
+        userId: testUserId,
+        quoteAssetId: usdAssetId,
       };
 
       const matchResult = await orderService.addOrderWithMatching(testMarketId, buyOrder);
@@ -289,8 +327,8 @@ describe("OrderService (e2e)", () => {
     });
 
     it("should match orders by price priority", async () => {
-      // Create holdings for the ask orders (1.0 + 1.0 = 2.0)
-      await TestCleanupHelper.createTestHolding(app, realPortfolioId, testMarketId, 2.0);
+      // Create base asset holdings for the ask orders (1.0 + 1.0 = 2.0)
+      await TestCleanupHelper.createTestAssetHolding(app, testUserId, testAssetId, 2.0);
 
       // Add sell orders at different prices (using addOrderWithMatching so they're saved to database)
       const sellOrders = [
@@ -300,7 +338,8 @@ describe("OrderService (e2e)", () => {
           side: "ask" as const,
           price: 50100, // Higher price
           quantity: 1.0,
-          portfolioId: realPortfolioId,
+          userId: testUserId,
+          quoteAssetId: usdAssetId,
         },
         {
           marketId: testMarketId,
@@ -308,7 +347,8 @@ describe("OrderService (e2e)", () => {
           side: "ask" as const,
           price: 50000, // Lower price (should match first)
           quantity: 1.0,
-          portfolioId: realPortfolioId,
+          userId: testUserId,
+          quoteAssetId: usdAssetId,
         },
       ];
 
@@ -326,7 +366,8 @@ describe("OrderService (e2e)", () => {
         side: "bid",
         price: 50050, // Between the two sell prices
         quantity: 1.0,
-        portfolioId: realPortfolioId,
+        userId: testUserId,
+        quoteAssetId: usdAssetId,
       };
 
       const matchResult = await orderService.addOrderWithMatching(testMarketId, buyOrder);
@@ -351,7 +392,8 @@ describe("OrderService (e2e)", () => {
         side: "bid",
         price: 49000,
         quantity: 2.0,
-        portfolioId: realPortfolioId,
+        userId: testUserId,
+        quoteAssetId: usdAssetId,
       };
 
       const testOrderWithTimestamp = { ...testOrder, timestamp: new Date() };
@@ -377,14 +419,15 @@ describe("OrderService (e2e)", () => {
       });
     });
 
-    it("should handle portfolio lookup errors gracefully", async () => {
+    it("should handle invalid user ID gracefully", async () => {
       const invalidOrder: Omit<OrderBookEntryDto, "timestamp"> = {
         marketId: testMarketId,
         orderId: uuidv4(),
         side: "bid",
         price: 50000,
         quantity: 1.0,
-        portfolioId: "invalid-portfolio-id",
+        userId: "invalid-user-id",
+        quoteAssetId: usdAssetId,
       };
 
       // This should handle the error gracefully
@@ -394,7 +437,7 @@ describe("OrderService (e2e)", () => {
         expect(result).toHaveProperty("matches");
         expect(result).toHaveProperty("remainingOrder");
       } catch (error) {
-        // Error is expected for invalid portfolio
+        // Error is expected for invalid user or insufficient assets
         expect(error).toBeDefined();
       }
     });

@@ -5,12 +5,16 @@ import { UpdateMarketDto } from "../dtos/market/update-market.dto";
 import { MarketFiltersDto } from "../dtos/market/market-filters.dto";
 import { MarketDto } from "../dtos/market/market.dto";
 import type { MarketCategory } from "../types/market-category";
+import { AssetService } from "@/modules/assets/services/asset.service";
 
 @Injectable()
 export class MarketService {
   private readonly logger = new Logger(MarketService.name);
 
-  constructor(private readonly marketDao: MarketDao) {}
+  constructor(
+    private readonly marketDao: MarketDao,
+    private readonly assetService: AssetService,
+  ) {}
 
   /**
    * Create a new market
@@ -42,8 +46,35 @@ export class MarketService {
         }
       }
 
-      // Create market in database
-      const marketId = await this.marketDao.createMarket(market);
+      // Resolve asset IDs from asset symbols if not provided
+      let baseAssetId = market.baseAssetId;
+      let quoteAssetId = market.quoteAssetId;
+
+      if (!baseAssetId && market.baseAsset) {
+        const baseAsset = await this.assetService.getAssetBySymbol(market.baseAsset);
+        if (!baseAsset) {
+          this.logger.error(`Base asset ${market.baseAsset} not found`);
+          return null;
+        }
+        baseAssetId = baseAsset.id;
+      }
+
+      if (!quoteAssetId && market.quoteAsset) {
+        const quoteAsset = await this.assetService.getAssetBySymbol(market.quoteAsset);
+        if (!quoteAsset) {
+          this.logger.error(`Quote asset ${market.quoteAsset} not found`);
+          return null;
+        }
+        quoteAssetId = quoteAsset.id;
+      }
+
+      // Create market in database with resolved asset IDs
+      const marketToCreate = {
+        ...market,
+        baseAssetId,
+        quoteAssetId,
+      };
+      const marketId = await this.marketDao.createMarket(marketToCreate);
       if (!marketId) {
         this.logger.error("Failed to create market in database");
         return null;
@@ -164,8 +195,28 @@ export class MarketService {
         }
       }
 
+      // Resolve asset IDs from asset symbols if updating assets
+      const updateData: UpdateMarketDto = { ...market };
+      if (market.baseAsset && !market.baseAssetId) {
+        const baseAsset = await this.assetService.getAssetBySymbol(market.baseAsset);
+        if (!baseAsset) {
+          this.logger.error(`Base asset ${market.baseAsset} not found`);
+          return null;
+        }
+        updateData.baseAssetId = baseAsset.id;
+      }
+
+      if (market.quoteAsset && !market.quoteAssetId) {
+        const quoteAsset = await this.assetService.getAssetBySymbol(market.quoteAsset);
+        if (!quoteAsset) {
+          this.logger.error(`Quote asset ${market.quoteAsset} not found`);
+          return null;
+        }
+        updateData.quoteAssetId = quoteAsset.id;
+      }
+
       // Update market in database
-      const updated = await this.marketDao.updateMarket(id, market);
+      const updated = await this.marketDao.updateMarket(id, updateData);
       if (!updated) {
         this.logger.error(`Failed to update market ${id}`);
         return null;

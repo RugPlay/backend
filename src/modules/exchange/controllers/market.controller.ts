@@ -80,8 +80,8 @@ export class MarketController {
       "bonds",
     ],
   })
-  @ApiQuery({ name: "baseCurrency", required: false })
-  @ApiQuery({ name: "quoteCurrency", required: false })
+  @ApiQuery({ name: "baseAssetId", required: false })
+  @ApiQuery({ name: "quoteAssetId", required: false })
   @ApiQuery({ name: "isActive", required: false, type: Boolean })
   @ApiQuery({ name: "is24h", required: false, type: Boolean })
   @ApiResponse({
@@ -91,15 +91,15 @@ export class MarketController {
   })
   async getMarkets(
     @Query("category") category?: MarketCategory,
-    @Query("baseCurrency") baseCurrency?: string,
-    @Query("quoteCurrency") quoteCurrency?: string,
+    @Query("baseAssetId") baseAssetId?: string,
+    @Query("quoteAssetId") quoteAssetId?: string,
     @Query("isActive") isActive?: boolean,
     @Query("is24h") is24h?: boolean,
   ): Promise<MarketDto[]> {
     const filters: MarketFiltersDto = {};
     if (category) filters.category = category;
-    if (baseCurrency) filters.baseCurrency = baseCurrency;
-    if (quoteCurrency) filters.quoteCurrency = quoteCurrency;
+    if (baseAssetId) filters.baseAssetId = baseAssetId;
+    if (quoteAssetId) filters.quoteAssetId = quoteAssetId;
     if (isActive !== undefined) filters.isActive = isActive;
     if (is24h !== undefined) filters.is24h = is24h;
 
@@ -286,6 +286,7 @@ export class MarketController {
         marketId: trade.marketId,
         takerOrderId: trade.takerOrderId,
         makerOrderId: trade.makerOrderId,
+        takerSide: trade.takerSide,
         type: trade.type, // Ensure the 'type' property is included to match TradeExecutionDto
         quantity: trade.quantity,
         price: trade.price,
@@ -293,8 +294,6 @@ export class MarketController {
         createdAt: trade.createdAt, // Include createdAt for backward compatibility
         takerUserId: trade.takerUserId,
         makerUserId: trade.makerUserId,
-        takerPortfolioId: trade.takerPortfolioId,
-        makerPortfolioId: trade.makerPortfolioId,
       }));
     } catch (error) {
       if (error instanceof HttpException) {

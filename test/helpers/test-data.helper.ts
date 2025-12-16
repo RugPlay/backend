@@ -1,19 +1,36 @@
 import { v4 as uuidv4 } from "uuid";
 import { CreateMarketDto } from "../../src/modules/exchange/dtos/market/create-market.dto";
-import { CreatePortfolioDto } from "../../src/modules/portfolio/dtos/create-portfolio.dto";
+import { CreateAssetDto } from "../../src/modules/assets/dtos/create-asset.dto";
 import { OrderBookEntryDto } from "../../src/modules/exchange/dtos/order/order-book-entry.dto";
 
 export class TestDataHelper {
   /**
+   * Create test asset data
+   */
+  static createTestAsset(overrides: Partial<CreateAssetDto> = {}): CreateAssetDto {
+    return {
+      symbol: "TEST",
+      name: "Test Asset",
+      type: "crypto",
+      decimals: 8,
+      isActive: true,
+      ...overrides,
+    };
+  }
+
+  /**
    * Create test market data
+   * Note: baseAsset and quoteAsset should be asset symbols, and baseAssetId/quoteAssetId should be set
    */
   static createTestMarket(overrides: Partial<CreateMarketDto> = {}): CreateMarketDto {
     return {
       name: "Test Market",
       symbol: "TEST/USD",
       category: "crypto",
-      baseCurrency: "TEST",
-      quoteCurrency: "USD",
+      baseAsset: "TEST",
+      quoteAsset: "USD",
+      baseAssetId: "", // Must be set from created asset
+      quoteAssetId: "", // Must be set from created asset
       minPriceIncrement: 0.01,
       minQuantityIncrement: 0.001,
       maxQuantity: 100,
@@ -25,23 +42,12 @@ export class TestDataHelper {
   }
 
   /**
-   * Create test portfolio data
-   */
-  static createTestPortfolio(overrides: Partial<CreatePortfolioDto> = {}): CreatePortfolioDto {
-    return {
-      balance: 100000, // $100k starting balance
-      type: "real",
-      ...overrides,
-    };
-  }
-
-
-  /**
    * Create test order data
    */
   static createTestOrder(
     marketId: string,
-    portfolioId: string,
+    userId: string,
+    quoteAssetId: string,
     overrides: Partial<Omit<OrderBookEntryDto, "timestamp">> = {}
   ): Omit<OrderBookEntryDto, "timestamp"> {
     return {
@@ -50,7 +56,8 @@ export class TestDataHelper {
       side: "bid",
       price: 50000,
       quantity: 1.0,
-      portfolioId,
+      userId,
+      quoteAssetId,
       ...overrides,
     };
   }
@@ -60,25 +67,25 @@ export class TestDataHelper {
    */
   static createMarketDepthOrders(
     marketId: string,
-    bidderPortfolioId: string,
-    askerPortfolioId?: string
+    bidderUserId: string,
+    askerUserId: string,
+    quoteAssetId: string
   ): {
     bids: Omit<OrderBookEntryDto, "timestamp">[];
     asks: Omit<OrderBookEntryDto, "timestamp">[];
   } {
-    const askerPortfolio = askerPortfolioId || bidderPortfolioId;
     const bids = [
-      this.createTestOrder(marketId, bidderPortfolioId, {
+      this.createTestOrder(marketId, bidderUserId, quoteAssetId, {
         side: "bid",
         price: 50000,
         quantity: 1.5,
       }),
-      this.createTestOrder(marketId, bidderPortfolioId, {
+      this.createTestOrder(marketId, bidderUserId, quoteAssetId, {
         side: "bid",
         price: 49500,
         quantity: 2.0,
       }),
-      this.createTestOrder(marketId, bidderPortfolioId, {
+      this.createTestOrder(marketId, bidderUserId, quoteAssetId, {
         side: "bid",
         price: 49000,
         quantity: 1.0,
@@ -86,17 +93,17 @@ export class TestDataHelper {
     ];
 
     const asks = [
-      this.createTestOrder(marketId, askerPortfolio, {
+      this.createTestOrder(marketId, askerUserId, quoteAssetId, {
         side: "ask",
         price: 51000,
         quantity: 1.2,
       }),
-      this.createTestOrder(marketId, askerPortfolio, {
+      this.createTestOrder(marketId, askerUserId, quoteAssetId, {
         side: "ask",
         price: 51500,
         quantity: 2.5,
       }),
-      this.createTestOrder(marketId, askerPortfolio, {
+      this.createTestOrder(marketId, askerUserId, quoteAssetId, {
         side: "ask",
         price: 52000,
         quantity: 3.0,
@@ -111,19 +118,20 @@ export class TestDataHelper {
    */
   static createMatchingOrders(
     marketId: string,
-    portfolioId1: string,
-    portfolioId2: string
+    userId1: string,
+    userId2: string,
+    quoteAssetId: string
   ): {
     makerOrder: Omit<OrderBookEntryDto, "timestamp">;
     takerOrder: Omit<OrderBookEntryDto, "timestamp">;
   } {
-    const makerOrder = this.createTestOrder(marketId, portfolioId1, {
+    const makerOrder = this.createTestOrder(marketId, userId1, quoteAssetId, {
       side: "ask",
       price: 50000,
       quantity: 2.0,
     });
 
-    const takerOrder = this.createTestOrder(marketId, portfolioId2, {
+    const takerOrder = this.createTestOrder(marketId, userId2, quoteAssetId, {
       side: "bid",
       price: 50000,
       quantity: 1.5, // Partial fill
@@ -137,22 +145,22 @@ export class TestDataHelper {
    */
   static createPriorityTestOrders(
     marketId: string,
-    askerPortfolioId: string,
-    bidderPortfolioId?: string
+    askerUserId: string,
+    bidderUserId: string,
+    quoteAssetId: string
   ): {
     orders: Omit<OrderBookEntryDto, "timestamp">[];
     matchingOrder: Omit<OrderBookEntryDto, "timestamp">;
   } {
-    const bidderPortfolio = bidderPortfolioId || askerPortfolioId;
     // Create orders at same price but different times (simulated by order)
     const orders = [
-      this.createTestOrder(marketId, askerPortfolioId, {
+      this.createTestOrder(marketId, askerUserId, quoteAssetId, {
         side: "ask",
         price: 50000,
         quantity: 1.0,
         orderId: "order-1", // First in time
       }),
-      this.createTestOrder(marketId, askerPortfolioId, {
+      this.createTestOrder(marketId, askerUserId, quoteAssetId, {
         side: "ask",
         price: 50000,
         quantity: 1.5,
@@ -160,7 +168,7 @@ export class TestDataHelper {
       }),
     ];
 
-    const matchingOrder = this.createTestOrder(marketId, bidderPortfolio, {
+    const matchingOrder = this.createTestOrder(marketId, bidderUserId, quoteAssetId, {
       side: "bid",
       price: 50000,
       quantity: 1.0, // Should match with order-1 due to time priority
@@ -182,11 +190,12 @@ export class TestDataHelper {
    */
   static createStressTestData(
     marketId: string,
-    bidderPortfolioId: string,
+    bidderUserId: string,
+    quoteAssetId: string,
     orderCount: number = 100,
-    askerPortfolioId?: string
+    askerUserId?: string
   ): Omit<OrderBookEntryDto, "timestamp">[] {
-    const askerPortfolio = askerPortfolioId || bidderPortfolioId;
+    const askerUser = askerUserId || bidderUserId;
     const orders: Omit<OrderBookEntryDto, "timestamp">[] = [];
 
     for (let i = 0; i < orderCount; i++) {
@@ -197,7 +206,7 @@ export class TestDataHelper {
       const quantity = Math.round((Math.random() * 5 + 0.1) * 1000) / 1000;
 
       orders.push(
-        this.createTestOrder(marketId, side === "bid" ? bidderPortfolioId : askerPortfolio, {
+        this.createTestOrder(marketId, side === "bid" ? bidderUserId : askerUser, quoteAssetId, {
           side,
           price,
           quantity,

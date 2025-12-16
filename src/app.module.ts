@@ -8,7 +8,7 @@ import sqlConfig from "@/config/sql.config";
 import redisConfig from "@/config/redis.config";
 import { SocketModule } from "@/modules/socket/socket.module";
 import { ExchangeModule } from "@/modules/exchange/exchange.module";
-import { PortfolioModule } from "@/modules/portfolio/portfolio.module";
+import { AssetsModule } from "@/modules/assets/assets.module";
 import { AllExceptionFilter } from "@/filters/all-exception.filter";
 import cookieConfig from "@/config/cookie.config";
 import { CacheModule } from "@nestjs/cache-manager";
@@ -75,7 +75,7 @@ import { PostgresDialect } from "kysely";
     }),
     SocketModule,
     ExchangeModule,
-    PortfolioModule,
+    AssetsModule,
   ],
   providers: [
     {

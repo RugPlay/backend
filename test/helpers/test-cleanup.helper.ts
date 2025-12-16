@@ -1,9 +1,8 @@
 import { INestApplication } from '@nestjs/common';
 import { OrderService } from '../../src/modules/exchange/services/order.service';
 import { MarketService } from '../../src/modules/exchange/services/market.service';
-import { PortfolioService } from '../../src/modules/portfolio/services/portfolio.service';
-import { HoldingDao } from '../../src/modules/portfolio/daos/holding.dao';
-import { PortfolioDao } from '../../src/modules/portfolio/daos/portfolio.dao';
+import { AssetService } from '../../src/modules/assets/services/asset.service';
+import { AssetHoldingDao } from '../../src/modules/assets/daos/asset-holding.dao';
 import { Kysely, sql } from 'kysely';
 import { DB } from '../../src/database/types/db';
 import { REDIS_CLIENT } from '../../src/redis/constants/redis.constants';
@@ -17,8 +16,8 @@ export class TestCleanupHelper {
   static async cleanupTestData(app: INestApplication): Promise<void> {
     const orderService = app.get(OrderService);
     // Get Kysely instance from any DAO (they all have it)
-    const holdingDao = app.get(HoldingDao);
-    const kysely = (holdingDao as any).kysely as Kysely<DB>;
+    const assetHoldingDao = app.get(AssetHoldingDao);
+    const kysely = (assetHoldingDao as any).kysely as Kysely<DB>;
 
     try {
       // Clear Redis data
@@ -32,8 +31,8 @@ export class TestCleanupHelper {
       await kysely.deleteFrom('trades').execute();
       await kysely.deleteFrom('orders').execute();
       await kysely.deleteFrom('holdings').execute();
-      await kysely.deleteFrom('portfolios').execute();
       await kysely.deleteFrom('markets').execute();
+      await kysely.deleteFrom('assets').execute();
       
       // Re-enable foreign key checks
       await sql`SET session_replication_role = DEFAULT`.execute(kysely);
@@ -43,118 +42,127 @@ export class TestCleanupHelper {
   }
 
   /**
-   * Create a test portfolio with sufficient balance
+   * Create test assets (USD and BTC for example)
    */
-  static async createTestPortfolio(
+  static async createTestAssets(
     app: INestApplication,
-    userId: string = 'test-user-id',
-    balance: number = 1000000
-  ): Promise<string> {
-    const portfolioService = app.get(PortfolioService);
+  ): Promise<{ usdAssetId: string; btcAssetId: string }> {
+    const assetService = app.get(AssetService);
     
-    const portfolioDto = await portfolioService.createPortfolio(userId, {
-      balance,
-      type: 'real',
+    // Create USD asset
+    const usdAsset = await assetService.createAsset({
+      symbol: 'USD',
+      name: 'US Dollar',
+      type: 'currency',
+      decimals: 2,
+      isActive: true,
     });
 
-    if (!portfolioDto || !portfolioDto.id) {
-      throw new Error('Failed to create test portfolio');
-    }
+    // Create BTC asset
+    const btcAsset = await assetService.createAsset({
+      symbol: 'BTC',
+      name: 'Bitcoin',
+      type: 'crypto',
+      decimals: 8,
+      isActive: true,
+    });
 
-    return portfolioDto.id;
+    return {
+      usdAssetId: usdAsset.id,
+      btcAssetId: btcAsset.id,
+    };
   }
 
   /**
-   * Create a test holding for a portfolio
+   * Create a test asset holding for a user
    */
-  static async createTestHolding(
+  static async createTestAssetHolding(
     app: INestApplication,
-    portfolioId: string,
-    marketId: string,
+    userId: string,
+    assetId: string,
     quantity: number
   ): Promise<void> {
-    const holdingDao = app.get(HoldingDao);
+    const assetHoldingDao = app.get(AssetHoldingDao);
     
-    const success = await holdingDao.adjustHoldingQuantity(
-      portfolioId,
-      marketId,
+    const success = await assetHoldingDao.adjustAssetQuantity(
+      userId,
+      assetId,
       quantity,
     );
 
     if (!success) {
-      throw new Error(`Failed to create test holding for portfolio ${portfolioId} in market ${marketId}`);
+      throw new Error(`Failed to create test asset holding for user ${userId} with asset ${assetId}`);
     }
   }
 
   /**
-   * Ensure portfolio has at least the specified balance, adding more if needed
+   * Ensure user has at least the specified asset quantity, adding more if needed
    */
-  static async ensureMinimumBalance(
+  static async ensureMinimumAssetQuantity(
     app: INestApplication,
-    portfolioId: string,
-    minimumBalance: number
+    userId: string,
+    assetId: string,
+    minimumQuantity: number
   ): Promise<void> {
-    const portfolioDao = app.get(PortfolioDao);
-    const currentBalance = await portfolioDao.getBalanceByPortfolioId(portfolioId);
+    const assetHoldingDao = app.get(AssetHoldingDao);
+    const currentAsset = await assetHoldingDao.getAsset(userId, assetId);
     
-    if (currentBalance === null) {
-      throw new Error(`Portfolio ${portfolioId} not found`);
-    }
+    const currentQuantity = currentAsset?.quantity || 0;
 
-    if (currentBalance < minimumBalance) {
-      const needed = minimumBalance - currentBalance;
-      const success = await portfolioDao.adjustBalanceByPortfolioId(portfolioId, needed);
+    if (currentQuantity < minimumQuantity) {
+      const needed = minimumQuantity - currentQuantity;
+      const success = await assetHoldingDao.adjustAssetQuantity(userId, assetId, needed);
       if (!success) {
-        throw new Error(`Failed to adjust balance for portfolio ${portfolioId}`);
+        throw new Error(`Failed to adjust asset quantity for user ${userId} asset ${assetId}`);
       }
     }
   }
 
   /**
-   * Reset portfolio balance to a specific amount
-   * This is useful for tests that need a known starting state
+   * Reset user asset quantity to a specific amount
    */
-  static async resetPortfolioBalance(
+  static async resetAssetQuantity(
     app: INestApplication,
-    portfolioId: string,
-    targetBalance: number
+    userId: string,
+    assetId: string,
+    targetQuantity: number
   ): Promise<void> {
-    const portfolioDao = app.get(PortfolioDao);
-    const currentBalance = await portfolioDao.getBalanceByPortfolioId(portfolioId);
+    const assetHoldingDao = app.get(AssetHoldingDao);
+    const currentAsset = await assetHoldingDao.getAsset(userId, assetId);
     
-    if (currentBalance === null) {
-      throw new Error(`Portfolio ${portfolioId} not found`);
-    }
+    const currentQuantity = currentAsset?.quantity || 0;
 
-    const difference = targetBalance - currentBalance;
+    const difference = targetQuantity - currentQuantity;
     if (Math.abs(difference) > 0.01) {
-      const success = await portfolioDao.adjustBalanceByPortfolioId(portfolioId, difference);
+      const success = await assetHoldingDao.adjustAssetQuantity(userId, assetId, difference);
       if (!success) {
-        throw new Error(`Failed to reset balance for portfolio ${portfolioId} to ${targetBalance}`);
+        throw new Error(`Failed to reset asset quantity for user ${userId} asset ${assetId} to ${targetQuantity}`);
       }
     }
   }
 
   /**
-   * Clear all holdings for a portfolio
+   * Clear all assets for a user
    */
-  static async clearPortfolioHoldings(
+  static async clearUserAssets(
     app: INestApplication,
-    portfolioId: string
+    userId: string
   ): Promise<void> {
-    const holdingDao = app.get(HoldingDao);
-    await holdingDao.deletePortfolioHoldings(portfolioId);
+    const assetHoldingDao = app.get(AssetHoldingDao);
+    await assetHoldingDao.deleteUserAssets(userId);
   }
 
   /**
-   * Reset portfolio to a clean state (balance and holdings)
+   * Reset user to a clean state (all assets)
    */
-  static async resetPortfolio(
+  static async resetUser(
     app: INestApplication,
-    portfolioId: string,
-    targetBalance: number
+    userId: string,
+    assets: Array<{ assetId: string; quantity: number }>
   ): Promise<void> {
-    await this.clearPortfolioHoldings(app, portfolioId);
-    await this.resetPortfolioBalance(app, portfolioId, targetBalance);
+    await this.clearUserAssets(app, userId);
+    for (const asset of assets) {
+      await this.resetAssetQuantity(app, userId, asset.assetId, asset.quantity);
+    }
   }
 }

@@ -11,8 +11,10 @@ export async function up(db: Kysely<any>): Promise<void> {
     .addColumn('name', 'varchar', (col) => col.notNull()) // e.g., "Bitcoin/US Dollar", "Euro/US Dollar", "Gold"
     .addColumn('category', sql`category_enum`, (col) => col.notNull())
     .addColumn('subcategory', 'varchar') // e.g., "energy", "metals", "major", "altcoin"
-    .addColumn('base_currency', 'varchar', (col) => col.notNull()) // e.g., "BTC", "EUR", "GOLD"
-    .addColumn('quote_currency', 'varchar', (col) => col.notNull()) // e.g., "USD", "JPY", "EUR"
+    .addColumn('base_asset', 'varchar', (col) => col.notNull()) // e.g., "BTC", "EUR", "GOLD"
+    .addColumn('quote_asset', 'varchar', (col) => col.notNull()) // e.g., "USD", "JPY", "EUR"
+    .addColumn('base_asset_id', 'uuid', (col) => col.notNull().references('assets.id').onDelete('restrict'))
+    .addColumn('quote_asset_id', 'uuid', (col) => col.notNull().references('assets.id').onDelete('restrict'))
     .addColumn('min_price_increment', sql`decimal(20,8)`, (col) => col.notNull().defaultTo('0.01')) // Minimum price movement
     .addColumn('min_quantity_increment', sql`decimal(20,8)`, (col) => col.notNull().defaultTo('0.00000001')) // Minimum quantity
     .addColumn('max_quantity', sql`decimal(20,8)`) // Maximum order quantity
@@ -28,7 +30,9 @@ export async function up(db: Kysely<any>): Promise<void> {
 
   // Create indexes for efficient queries
   await db.schema.createIndex('idx_markets_category_subcategory').on('markets').columns(['category', 'subcategory']).execute();
-  await db.schema.createIndex('idx_markets_base_quote_currency').on('markets').columns(['base_currency', 'quote_currency']).execute();
+  await db.schema.createIndex('idx_markets_base_quote_asset').on('markets').columns(['base_asset', 'quote_asset']).execute();
+  await db.schema.createIndex('idx_markets_base_asset_id').on('markets').column('base_asset_id').execute();
+  await db.schema.createIndex('idx_markets_quote_asset_id').on('markets').column('quote_asset_id').execute();
   await db.schema.createIndex('idx_markets_is_active').on('markets').column('is_active').execute();
   await db.schema.createIndex('idx_markets_symbol').on('markets').column('symbol').execute();
 }
