@@ -41,10 +41,10 @@ export class HoldingsProductionDto {
  */
 export class HoldingsProductionQueryDto extends TimeBucketQueryDto {
   @ApiPropertyOptional({
-    description: "Filter by specific user ID",
-    example: "user_123e4567-e89b-12d3-a456-426614174000",
+    description: "Filter by specific corporation ID",
+    example: "123e4567-e89b-12d3-a456-426614174000",
   })
-  userId?: string;
+  corporationId?: string;
 
   @ApiPropertyOptional({
     description: "Filter by specific asset ID",

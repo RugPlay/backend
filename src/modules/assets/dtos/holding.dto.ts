@@ -8,10 +8,10 @@ export class HoldingDto {
   id: string;
 
   @ApiProperty({
-    description: "The user ID that owns this holding",
-    example: "user_123e4567-e89b-12d3-a456-426614174000",
+    description: "The corporation ID that owns this holding",
+    example: "123e4567-e89b-12d3-a456-426614174000",
   })
-  userId: string;
+  corporationId: string;
 
   @ApiProperty({
     description: "The asset ID",

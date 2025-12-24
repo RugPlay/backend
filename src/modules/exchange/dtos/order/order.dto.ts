@@ -46,10 +46,10 @@ export class OrderDto {
   updatedAt: Date;
 
   @ApiProperty({
-    description: "The user ID that owns this order",
-    example: "user_123e4567-e89b-12d3-a456-426614174000",
+    description: "The corporation ID that owns this order",
+    example: "123e4567-e89b-12d3-a456-426614174000",
   })
-  userId: string;
+  corporationId: string;
 
   @ApiProperty({
     description: "The quote asset ID (for both BID and ASK orders)",

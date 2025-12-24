@@ -18,7 +18,7 @@ export class OrderMatchingRequestDto {
       quantity: 1.5,
       orderId: "ord_123e4567-e89b-12d3-a456-426614174000",
       side: "bid",
-      userId: "user_123e4567-e89b-12d3-a456-426614174000",
+      corporationId: "123e4567-e89b-12d3-a456-426614174000",
       quoteAssetId: "123e4567-e89b-12d3-a456-426614174000",
     },
   })

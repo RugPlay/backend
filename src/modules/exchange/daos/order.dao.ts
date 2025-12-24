@@ -22,7 +22,7 @@ export class OrderDao extends KyselyDao<OrderDao> {
         .insertInto('orders')
         .values({
           market_id: order.marketId,
-          user_id: order.userId,
+          corporation_id: order.corporationId,
           quote_asset_id: order.quoteAssetId,
           side: order.side,
           price: order.price.toString(),
@@ -86,10 +86,12 @@ export class OrderDao extends KyselyDao<OrderDao> {
   async getOrdersByMarketAndSideForMatching(
     marketId: string,
     side: "bid" | "ask",
+    trx?: any,
   ): Promise<OrderDto[]> {
     try {
+      const db = trx || this.kysely;
       const orderBy = side === "bid" ? "desc" : "asc";
-      const results = await this.kysely
+      const results = await db
         .selectFrom('orders')
         .selectAll()
         .where('market_id', '=', marketId)
@@ -188,9 +190,11 @@ export class OrderDao extends KyselyDao<OrderDao> {
   async updateOrderQuantity(
     orderId: string,
     quantity: number,
+    trx?: any,
   ): Promise<boolean> {
     try {
-      const result = await this.kysely
+      const db = trx || this.kysely;
+      const result = await db
         .updateTable('orders')
         .set({
           quantity: quantity.toString(),
@@ -322,9 +326,10 @@ export class OrderDao extends KyselyDao<OrderDao> {
   /**
    * Get an order by ID
    */
-  async getOrderById(orderId: string): Promise<OrderDto | null> {
+  async getOrderById(orderId: string, trx?: any): Promise<OrderDto | null> {
     try {
-      const result = await this.kysely
+      const db = trx || this.kysely;
+      const result = await db
         .selectFrom('orders')
         .selectAll()
         .where('id', '=', orderId)
@@ -345,7 +350,7 @@ export class OrderDao extends KyselyDao<OrderDao> {
     const dto = new OrderDto();
     dto.id = record.id;
     dto.marketId = record.market_id;
-    dto.userId = record.user_id;
+    dto.corporationId = record.corporation_id;
     dto.quoteAssetId = record.quote_asset_id;
     dto.side = record.side;
     dto.price = parseFloat(record.price);

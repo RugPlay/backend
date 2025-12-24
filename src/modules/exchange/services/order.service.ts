@@ -114,8 +114,8 @@ export class OrderService implements OnModuleInit {
     order: Omit<OrderBookEntryDto, "timestamp">,
   ): Promise<OrderMatchingResultDto> {
     try {
-      // Validate user ID format before processing
-      if (!order.userId) {
+      // Validate corporation ID format before processing
+      if (!order.corporationId) {
         throw new HttpException(
           {
             statusCode: 400,
@@ -183,7 +183,7 @@ export class OrderService implements OnModuleInit {
       if (order.side === "ask") {
         // For ASK orders (selling), need to reserve base asset holdings
         const reserved = await this.assetHoldingDao.reserveAsset(
-          order.userId,
+          order.corporationId,
           market.baseAssetId,
           order.quantity,
         );
@@ -201,7 +201,7 @@ export class OrderService implements OnModuleInit {
         // For BID orders (buying), need to reserve quote asset holdings
         const totalCost = order.price * order.quantity;
         const reserved = await this.assetHoldingDao.reserveAsset(
-          order.userId,
+          order.corporationId,
           market.quoteAssetId,
           totalCost,
         );
@@ -224,14 +224,14 @@ export class OrderService implements OnModuleInit {
         // If order creation fails, restore the reserved assets
         if (order.side === "ask") {
           await this.assetHoldingDao.adjustAssetQuantity(
-            order.userId,
+            order.corporationId,
             market.baseAssetId,
             order.quantity, // Restore by adding back
           );
         } else {
           const totalCost = order.price * order.quantity;
           await this.assetHoldingDao.adjustAssetQuantity(
-            order.userId,
+            order.corporationId,
             market.quoteAssetId,
             totalCost, // Restore by adding back
           );
@@ -255,14 +255,14 @@ export class OrderService implements OnModuleInit {
         // If order creation failed, restore the reserved assets
         if (order.side === "ask") {
           await this.assetHoldingDao.adjustAssetQuantity(
-            order.userId,
+            order.corporationId,
             market.baseAssetId,
             order.quantity, // Restore by adding back
           );
         } else {
           const totalCost = order.price * order.quantity;
           await this.assetHoldingDao.adjustAssetQuantity(
-            order.userId,
+            order.corporationId,
             market.quoteAssetId,
             totalCost, // Restore by adding back
           );
@@ -276,135 +276,189 @@ export class OrderService implements OnModuleInit {
         orderId: savedTakerOrderId,
       };
 
-      // Get opposing orders for matching from database (not aggregated Redis data)
-      const opposingSide = order.side === "bid" ? "ask" : "bid";
-      const opposingOrdersFromDb = await this.orderDao.getOrdersByMarketAndSideForMatching(marketId, opposingSide);
-      
-      // Convert database orders to OrderBookEntryDto format
-      const opposingOrders: OrderBookEntryDto[] = opposingOrdersFromDb.map(dbOrder => ({
-        marketId: dbOrder.marketId,
-        price: dbOrder.price,
-        quantity: dbOrder.quantity,
-        side: dbOrder.side,
-        timestamp: dbOrder.createdAt,
-        orderId: dbOrder.id,
-        userId: dbOrder.userId,
-        quoteAssetId: dbOrder.quoteAssetId,
-      }));
+      // Wrap the critical matching section in a transaction to prevent race conditions
+      // This ensures that order matching, trade creation, and quantity updates are atomic
+      const matchingResult = await this.orderDao.transaction(async (trx) => {
+        const orderDaoTrx = this.orderDao.transacting(trx);
+        const tradeDaoTrx = this.tradeDao.transacting(trx);
+        const assetHoldingDaoTrx = this.assetHoldingDao.transacting(trx);
 
-      // Calculate matches between the incoming order and existing orders
-      // Matches occur when: bid price >= ask price (or ask price <= bid price)
-      // The match quantity is the minimum of remaining quantities
-      const calculatedMatches = this.calculateMatches(takerOrder, opposingOrders);
-      const matches: MatchResultDto[] = [];
+        // Get opposing orders for matching from database with row-level locking
+        // The forUpdate() lock will be held for the duration of the transaction
+        const opposingSide = order.side === "bid" ? "ask" : "bid";
+        const opposingOrdersFromDb = await orderDaoTrx.getOrdersByMarketAndSideForMatching(
+          marketId,
+          opposingSide,
+          trx.instance(),
+        );
+        
+        // Convert database orders to OrderBookEntryDto format
+        const opposingOrders: OrderBookEntryDto[] = opposingOrdersFromDb.map(dbOrder => ({
+          marketId: dbOrder.marketId,
+          price: dbOrder.price,
+          quantity: dbOrder.quantity,
+          side: dbOrder.side,
+          timestamp: dbOrder.createdAt,
+          orderId: dbOrder.id,
+          corporationId: dbOrder.corporationId,
+          quoteAssetId: dbOrder.quoteAssetId,
+        }));
 
-      // If matches are found, create trades as acknowledgements that both sides have been filled
-      // Each trade represents a completed match between the taker and maker orders
-      if (calculatedMatches.length > 0) {
-        await this.createTrades(calculatedMatches, matches, marketId, takerOrder);
-      }
+        // Calculate matches between the incoming order and existing orders
+        // Matches occur when: bid price >= ask price (or ask price <= bid price)
+        // The match quantity is the minimum of remaining quantities
+        const calculatedMatches = this.calculateMatches(takerOrder, opposingOrders);
+        const matches: MatchResultDto[] = [];
 
-      // Handle remaining order quantity
-      let remainingOrder: OrderBookEntryDto | undefined = undefined;
-      const totalMatched = calculatedMatches.reduce((sum, match) => sum + match.quantity, 0);
-      const remainingQuantity = takerOrder.quantity - totalMatched;
-
-      if (remainingQuantity > 0) {
-        // Update the existing taker order with the remaining quantity
-        const updateSuccess = await this.orderDao.updateOrderQuantity(savedTakerOrderId, remainingQuantity);
-        if (updateSuccess) {
-          remainingOrder = {
-            ...takerOrder,
-            quantity: remainingQuantity,
-          };
-
-          // Only restore assets for the unfilled portion if there were some matches
-          // If there were no matches (totalMatched === 0), the order is being added to the order book
-          // and the assets should stay reserved (deducted)
-          if (totalMatched > 0) {
-            // Restore assets for the unfilled portion (partial fill scenario)
-            if (order.side === "ask") {
-              // Restore base asset holdings for unfilled quantity
-              await this.assetHoldingDao.adjustAssetQuantity(
-                order.userId,
-                market.baseAssetId,
-                remainingQuantity, // Restore by adding back
-              );
-            } else {
-              // Restore quote asset holdings for unfilled quantity
-              const remainingCost = order.price * remainingQuantity;
-              await this.assetHoldingDao.adjustAssetQuantity(
-                order.userId,
-                market.quoteAssetId,
-                remainingCost, // Restore by adding back
-              );
-            }
-          }
-
-          // Update Redis after successful database commit
-          await this.addOrderToRedisAtomically(
+        // If matches are found, create trades as acknowledgements that both sides have been filled
+        // Each trade represents a completed match between the taker and maker orders
+        if (calculatedMatches.length > 0) {
+          await this.createTrades(
+            calculatedMatches,
+            matches,
             marketId,
-            remainingOrder.orderId,
-            remainingOrder,
-            remainingOrder.side,
-            remainingOrder.price,
-            remainingOrder.quantity,
+            takerOrder,
+            market,
+            trx.instance(),
+            orderDaoTrx,
+            tradeDaoTrx,
+            assetHoldingDaoTrx,
           );
         }
+
+        // Handle remaining order quantity
+        let remainingOrder: OrderBookEntryDto | undefined = undefined;
+        const totalMatched = calculatedMatches.reduce((sum, match) => sum + match.quantity, 0);
+        const remainingQuantity = takerOrder.quantity - totalMatched;
+
+        if (remainingQuantity > 0) {
+          // Update the existing taker order with the remaining quantity
+          const updateSuccess = await orderDaoTrx.updateOrderQuantity(
+            savedTakerOrderId,
+            remainingQuantity,
+            trx.instance(),
+          );
+          if (updateSuccess) {
+            remainingOrder = {
+              ...takerOrder,
+              quantity: remainingQuantity,
+            };
+
+            // Only restore assets for the unfilled portion if there were some matches
+            // If there were no matches (totalMatched === 0), the order is being added to the order book
+            // and the assets should stay reserved (deducted)
+            if (totalMatched > 0) {
+              // Restore assets for the unfilled portion (partial fill scenario)
+              if (order.side === "ask") {
+                // Restore base asset holdings for unfilled quantity
+                await assetHoldingDaoTrx.adjustAssetQuantity(
+                  order.corporationId,
+                  market.baseAssetId,
+                  remainingQuantity, // Restore by adding back
+                  trx.instance(),
+                );
+              } else {
+                // Restore quote asset holdings for unfilled quantity
+                const remainingCost = order.price * remainingQuantity;
+                await assetHoldingDaoTrx.adjustAssetQuantity(
+                  order.corporationId,
+                  market.quoteAssetId,
+                  remainingCost, // Restore by adding back
+                  trx.instance(),
+                );
+              }
+            }
+          }
+        } else {
+          // Order was fully matched - set quantity to 0 instead of deleting
+          // This allows the order to remain in the database for historical purposes (trades reference it)
+          // but prevents it from being matched again (filtered out by quantity > 0)
+          await orderDaoTrx.updateOrderQuantity(savedTakerOrderId, 0, trx.instance());
+        }
+
+        // Process maker order updates within the transaction
+        const updatedOrders: Array<{ orderId: string; newQuantity: number }> = [];
+        const completedOrderIds: string[] = [];
+        
+        for (const match of calculatedMatches) {
+          const orderData = await orderDaoTrx.getOrderById(match.matchedOrderId, trx.instance());
+          if (orderData) {
+            const remainingQuantity = orderData.quantity - match.quantity;
+            
+            if (remainingQuantity <= 0) {
+              // Order is fully matched - set quantity to 0
+              await orderDaoTrx.updateOrderQuantity(match.matchedOrderId, 0, trx.instance());
+              completedOrderIds.push(match.matchedOrderId);
+            } else {
+              // Order is partially matched - update quantity
+              await orderDaoTrx.updateOrderQuantity(
+                match.matchedOrderId,
+                remainingQuantity,
+                trx.instance(),
+              );
+              updatedOrders.push({
+                orderId: match.matchedOrderId,
+                newQuantity: remainingQuantity,
+              });
+              
+              // Restore assets for the unfilled portion of maker order
+              if (orderData.side === "ask") {
+                // Restore base asset holdings for unfilled quantity
+                await assetHoldingDaoTrx.adjustAssetQuantity(
+                  orderData.corporationId,
+                  market.baseAssetId,
+                  remainingQuantity, // Restore by adding back
+                  trx.instance(),
+                );
+              } else {
+                // Restore quote asset holdings for unfilled quantity
+                const remainingCost = orderData.price * remainingQuantity;
+                await assetHoldingDaoTrx.adjustAssetQuantity(
+                  orderData.corporationId,
+                  market.quoteAssetId,
+                  remainingCost, // Restore by adding back
+                  trx.instance(),
+                );
+              }
+            }
+          }
+        }
+
+        return {
+          matches,
+          completedOrderIds,
+          updatedOrders,
+          remainingOrder,
+        } as OrderMatchingResultDto;
+      });
+
+      // Update Redis after successful database commit (outside transaction)
+      if (matchingResult.remainingOrder) {
+        await this.addOrderToRedisAtomically(
+          marketId,
+          matchingResult.remainingOrder.orderId,
+          matchingResult.remainingOrder,
+          matchingResult.remainingOrder.side,
+          matchingResult.remainingOrder.price,
+          matchingResult.remainingOrder.quantity,
+        );
       } else {
-        // Order was fully matched - set quantity to 0 instead of deleting
-        // This allows the order to remain in the database for historical purposes (trades reference it)
-        // but prevents it from being matched again (filtered out by quantity > 0)
-        await this.orderDao.updateOrderQuantity(savedTakerOrderId, 0);
-        
-        // Remove from Redis since the order is fully matched
+        // Order was fully matched - remove from Redis
         const orderKey = `${this.ORDER_PREFIX}${savedTakerOrderId}`;
-        const orderBookKey = `${this.ORDER_BOOK_PREFIX}${marketId}:${order.side}`;
-        const score = order.side === "bid" ? -order.price : order.price;
-        
-        // Remove the full quantity from Redis
         await this.removeQuantityFromRedisAtomically(
           marketId,
           order.side,
           order.price,
           order.quantity,
         );
-        
-        // Remove the individual order entry from Redis
         await this.redis.del(orderKey);
       }
 
-      // Calculate updated orders (partially filled orders) and completed orders
-      const updatedOrders: Array<{ orderId: string; newQuantity: number }> = [];
-      const completedOrderIds: string[] = [];
-      
-      for (const match of calculatedMatches) {
-        const orderData = await this.orderDao.getOrderById(match.matchedOrderId);
-        if (orderData) {
-          const remainingQuantity = orderData.quantity - match.quantity;
-          if (remainingQuantity > 0) {
-            updatedOrders.push({
-              orderId: match.matchedOrderId,
-              newQuantity: remainingQuantity,
-            });
-          } else {
-            completedOrderIds.push(match.matchedOrderId);
-          }
-        }
-      }
-
-      // Process matching results in Redis
-      const matchingResult: OrderMatchingResultDto = {
-        matches,
-        completedOrderIds,
-        updatedOrders,
-        remainingOrder,
-      };
-
+      // Update Redis for maker orders after successful database commit
       await this.processMatchingResults(marketId, matchingResult);
 
       // Emit events after successful commit
-      for (const match of matches) {
+      for (const match of matchingResult.matches) {
         await this.eventService.publishOrderMatch(match);
       }
 
@@ -431,38 +485,40 @@ export class OrderService implements OnModuleInit {
     matches: MatchResultDto[],
     marketId: string,
     order: Omit<OrderBookEntryDto, "timestamp">,
+    market: any,
+    trx: any,
+    orderDaoTrx: any,
+    tradeDaoTrx: any,
+    assetHoldingDaoTrx: any,
   ): Promise<void> {
-    // Get market to determine base/quote currency
-    const market = await this.marketService.getMarketById(marketId);
-    if (!market) {
-      this.logger.error(`Market ${marketId} not found when creating trades`);
-      return;
-    }
-
     for (const match of calculatedMatches) {
-      // Get maker order to determine maker side and userId
-      const makerOrder = await this.orderDao.getOrderById(match.matchedOrderId);
+      // Get maker order to determine maker side and corporationId
+      const makerOrder = await orderDaoTrx.getOrderById(match.matchedOrderId, trx);
       if (!makerOrder) {
         this.logger.error(`Maker order ${match.matchedOrderId} not found`);
         continue;
       }
 
       // Get or create holdings for both taker and maker
-      const takerBaseHoldingId = await this.assetHoldingDao.getOrCreateAssetId(
-        order.userId,
+      const takerBaseHoldingId = await assetHoldingDaoTrx.getOrCreateAssetId(
+        order.corporationId,
         market.baseAssetId,
+        trx,
       );
-      const takerQuoteHoldingId = await this.assetHoldingDao.getOrCreateAssetId(
-        order.userId,
+      const takerQuoteHoldingId = await assetHoldingDaoTrx.getOrCreateAssetId(
+        order.corporationId,
         market.quoteAssetId,
+        trx,
       );
-      const makerBaseHoldingId = await this.assetHoldingDao.getOrCreateAssetId(
-        makerOrder.userId,
+      const makerBaseHoldingId = await assetHoldingDaoTrx.getOrCreateAssetId(
+        makerOrder.corporationId,
         market.baseAssetId,
+        trx,
       );
-      const makerQuoteHoldingId = await this.assetHoldingDao.getOrCreateAssetId(
-        makerOrder.userId,
+      const makerQuoteHoldingId = await assetHoldingDaoTrx.getOrCreateAssetId(
+        makerOrder.corporationId,
         market.quoteAssetId,
+        trx,
       );
 
       // Update holdings/balances based on trade
@@ -470,58 +526,66 @@ export class OrderService implements OnModuleInit {
 
       if (order.side === "bid") {
         // Taker is buying: Quote asset was reserved, now add base asset holdings
-        await this.assetHoldingDao.adjustAssetQuantity(
-          order.userId,
+        await assetHoldingDaoTrx.adjustAssetQuantity(
+          order.corporationId,
           market.baseAssetId,
           match.quantity, // Add purchased base asset
+          trx,
         );
         // Update cost basis for taker (buyer)
-        await this.assetHoldingDao.updateCostBasisOnPurchase(
-          order.userId,
+        await assetHoldingDaoTrx.updateCostBasisOnPurchase(
+          order.corporationId,
           market.baseAssetId,
           match.quantity,
           match.price,
+          trx,
         );
 
         // Maker is selling: Add quote asset (cash) from sale
-        await this.assetHoldingDao.adjustAssetQuantity(
-          makerOrder.userId,
+        await assetHoldingDaoTrx.adjustAssetQuantity(
+          makerOrder.corporationId,
           market.quoteAssetId,
           tradeValue, // Add quote asset from sale
+          trx,
         );
         // Update cost basis for maker (seller) - reduce cost basis proportionally
-        await this.assetHoldingDao.updateCostBasisOnSale(
-          makerOrder.userId,
+        await assetHoldingDaoTrx.updateCostBasisOnSale(
+          makerOrder.corporationId,
           market.baseAssetId,
           match.quantity,
+          trx,
         );
       } else {
         // Taker is selling: Base asset was reserved (deducted) when order was placed
         // Now add quote asset from the sale
-        await this.assetHoldingDao.adjustAssetQuantity(
-          order.userId,
+        await assetHoldingDaoTrx.adjustAssetQuantity(
+          order.corporationId,
           market.quoteAssetId,
           tradeValue, // Add quote asset from sale
+          trx,
         );
         // Update cost basis for taker (seller) - reduce cost basis proportionally
-        await this.assetHoldingDao.updateCostBasisOnSale(
-          order.userId,
+        await assetHoldingDaoTrx.updateCostBasisOnSale(
+          order.corporationId,
           market.baseAssetId,
           match.quantity,
+          trx,
         );
 
         // Maker is buying: Add base asset holdings
-        await this.assetHoldingDao.adjustAssetQuantity(
-          makerOrder.userId,
+        await assetHoldingDaoTrx.adjustAssetQuantity(
+          makerOrder.corporationId,
           market.baseAssetId,
           match.quantity, // Add purchased base asset
+          trx,
         );
         // Update cost basis for maker (buyer)
-        await this.assetHoldingDao.updateCostBasisOnPurchase(
-          makerOrder.userId,
+        await assetHoldingDaoTrx.updateCostBasisOnPurchase(
+          makerOrder.corporationId,
           market.baseAssetId,
           match.quantity,
           match.price,
+          trx,
         );
       }
 
@@ -538,11 +602,11 @@ export class OrderService implements OnModuleInit {
         timestamp: new Date(),
         takerHoldingId: takerBaseHoldingId || undefined,
         makerHoldingId: makerBaseHoldingId || undefined,
-        takerUserId: order.userId,
-        makerUserId: makerOrder.userId,
+        takerCorporationId: order.corporationId,
+        makerCorporationId: makerOrder.corporationId,
       };
 
-      const tradeResult = await this.tradeDao.createTrade(tradeExecution);
+      const tradeResult = await tradeDaoTrx.createTrade(tradeExecution, trx);
       if (!tradeResult) {
         this.logger.error(`Failed to create trade for order ${order.orderId} matching with ${match.matchedOrderId}`);
         // Continue processing other matches even if one fails
@@ -647,63 +711,36 @@ export class OrderService implements OnModuleInit {
   }
 
   /**
-   * Process matching results to update database and Redis
+   * Process matching results to update Redis only
+   * Database updates are now handled within the transaction in processOrderMatching
    */
   private async processMatchingResults(
     marketId: string,
     matchingResult: OrderMatchingResultDto,
   ): Promise<void> {
     try {
-      // Get market to determine base/quote currency
-      const market = await this.marketService.getMarketById(marketId);
-      if (!market) {
-        this.logger.error(`Market ${marketId} not found when processing matching results`);
-        return;
-      }
-
-      // Process each matched order
+      // Process each matched order - update Redis for maker orders
       for (const match of matchingResult.matches) {
-        // Get the current order from database
+        // Get the current order from database to determine side and price for Redis update
         const orderData = await this.orderDao.getOrderById(match.makerOrderId);
         if (orderData) {
-          const remainingQuantity = orderData.quantity - match.matchedQuantity;
+          const isCompleted = matchingResult.completedOrderIds.includes(match.makerOrderId);
           
-          if (remainingQuantity <= 0) {
-            // Order is fully matched - set quantity to 0 instead of deleting
-            // This allows the order to remain in the database for historical purposes (trades reference it)
-            // but prevents it from being matched again (filtered out by quantity > 0)
-            await this.orderDao.updateOrderQuantity(match.makerOrderId, 0);
-            
-            // Remove the full quantity from Redis
+          if (isCompleted) {
+            // Order is fully matched - remove from Redis
+            // Remove the matched quantity from Redis
             await this.removeQuantityFromRedisAtomically(
               marketId,
               orderData.side,
               match.matchedPrice,
-              orderData.quantity,
+              match.matchedQuantity,
             );
+            
+            // Remove the individual order entry from Redis
+            const orderKey = `${this.ORDER_PREFIX}${match.makerOrderId}`;
+            await this.redis.del(orderKey);
           } else {
-            // Order is partially matched - update quantity in database
-            await this.orderDao.updateOrderQuantity(match.makerOrderId, remainingQuantity);
-            
-            // Restore assets for the unfilled portion of maker order
-            if (orderData.side === "ask") {
-              // Restore base asset holdings for unfilled quantity
-              await this.assetHoldingDao.adjustAssetQuantity(
-                orderData.userId,
-                market.baseAssetId,
-                remainingQuantity, // Restore by adding back
-              );
-            } else {
-              // Restore quote asset holdings for unfilled quantity
-              const remainingCost = orderData.price * remainingQuantity;
-              await this.assetHoldingDao.adjustAssetQuantity(
-                orderData.userId,
-                market.quoteAssetId,
-                remainingCost, // Restore by adding back
-              );
-            }
-            
-            // Remove only the matched quantity from Redis
+            // Order is partially matched - remove only the matched quantity from Redis
             await this.removeQuantityFromRedisAtomically(
               marketId,
               orderData.side,
@@ -754,7 +791,7 @@ export class OrderService implements OnModuleInit {
             side,
             timestamp: new Date(),
             orderId: `aggregated-${marketId}-${side}-${price}`,
-            userId: "aggregated",
+            corporationId: "aggregated",
             quoteAssetId: "aggregated",
           });
         }
@@ -830,7 +867,7 @@ export class OrderService implements OnModuleInit {
           side: "bid",
           timestamp: new Date(),
           orderId: `best-bid-${marketId}`,
-          userId: "aggregated",
+          corporationId: "aggregated",
           quoteAssetId: "aggregated",
         };
       }
@@ -862,7 +899,7 @@ export class OrderService implements OnModuleInit {
           side: "ask",
           timestamp: new Date(),
           orderId: `best-ask-${marketId}`,
-          userId: "aggregated",
+          corporationId: "aggregated",
           quoteAssetId: "aggregated",
         };
       }
@@ -921,7 +958,7 @@ export class OrderService implements OnModuleInit {
       if (side === "ask") {
         // Restore base asset holdings for ASK orders (selling)
         await this.assetHoldingDao.adjustAssetQuantity(
-          orderData.userId,
+          orderData.corporationId,
           market.baseAssetId,
           orderData.quantity, // Restore by adding back
         );
@@ -929,7 +966,7 @@ export class OrderService implements OnModuleInit {
         // Restore quote asset holdings for BID orders (buying)
         const totalCost = orderData.price * orderData.quantity;
         await this.assetHoldingDao.adjustAssetQuantity(
-          orderData.userId,
+          orderData.corporationId,
           market.quoteAssetId,
           totalCost, // Restore by adding back
         );
@@ -976,8 +1013,8 @@ export class OrderService implements OnModuleInit {
         price: trade.price,
         timestamp: trade.createdAt,
         createdAt: trade.createdAt, // Also include createdAt for backward compatibility
-        takerUserId: trade.takerUserId,
-        makerUserId: trade.makerUserId,
+        takerCorporationId: trade.takerCorporationId,
+        makerCorporationId: trade.makerCorporationId,
       }));
     } catch (error) {
       this.logger.error(`Error getting recent trades for market ${marketId}:`, error);
@@ -1081,7 +1118,7 @@ export class OrderService implements OnModuleInit {
       for (const order of bidOrders) {
         const totalCost = order.price * order.quantity;
         await this.assetHoldingDao.adjustAssetQuantity(
-          order.userId,
+          order.corporationId,
           market.quoteAssetId,
           totalCost, // Restore by adding back
         );
@@ -1090,7 +1127,7 @@ export class OrderService implements OnModuleInit {
       // Restore base asset holdings for all ASK orders (selling orders that reserved base asset)
       for (const order of askOrders) {
         await this.assetHoldingDao.adjustAssetQuantity(
-          order.userId,
+          order.corporationId,
           market.baseAssetId,
           order.quantity, // Restore by adding back
         );
@@ -1155,7 +1192,7 @@ export class OrderService implements OnModuleInit {
         const matchQuantity = Math.min(remainingQuantity, existingOrder.quantity);
         matches.push({
           matchedOrderId: existingOrder.orderId,
-          matchedUserId: existingOrder.userId,
+          matchedCorporationId: existingOrder.corporationId,
           price: existingOrder.price, // Use maker's price (price-time priority)
           quantity: matchQuantity,
         });
@@ -1188,7 +1225,7 @@ export class OrderService implements OnModuleInit {
         timestamp: order.createdAt,
         orderId: order.id,
         side: order.side,
-        userId: order.userId,
+        corporationId: order.corporationId,
         quoteAssetId: order.quoteAssetId,
       }));
     } catch (error) {

@@ -9,8 +9,8 @@ import { TestCleanupHelper } from "./helpers/test-cleanup.helper";
 describe("Exchange (e2e)", () => {
   let app: INestApplication;
   let testMarketId: string;
-  let testUserId1: string;
-  let testUserId2: string;
+  let testCorporationId1: string;
+  let testCorporationId2: string;
   let usdAssetId: string;
   let btcAssetId: string;
 
@@ -37,18 +37,18 @@ describe("Exchange (e2e)", () => {
   });
 
   async function setupTestData() {
-    // Create test user IDs
-    testUserId1 = uuidv4();
-    testUserId2 = uuidv4();
+    // Create test corporations
+    testCorporationId1 = await TestCleanupHelper.createTestCorporation(app, `Test Corp 1 ${Date.now()}`);
+    testCorporationId2 = await TestCleanupHelper.createTestCorporation(app, `Test Corp 2 ${Date.now()}`);
 
     // Create test assets
     const assets = await TestCleanupHelper.createTestAssets(app);
     usdAssetId = assets.usdAssetId;
     btcAssetId = assets.btcAssetId;
 
-    // Give users initial USD holdings for trading
-    await TestCleanupHelper.createTestAssetHolding(app, testUserId1, usdAssetId, 1000000);
-    await TestCleanupHelper.createTestAssetHolding(app, testUserId2, usdAssetId, 1000000);
+    // Give corporations initial USD holdings for trading
+    await TestCleanupHelper.createTestAssetHolding(app, testCorporationId1, usdAssetId, 1000000);
+    await TestCleanupHelper.createTestAssetHolding(app, testCorporationId2, usdAssetId, 1000000);
 
     // Create a test market
     const marketData = {
@@ -177,7 +177,7 @@ describe("Exchange (e2e)", () => {
         side: "bid" as const,
         price: 50000,
         quantity: 1.5,
-        userId: testUserId1,
+        corporationId: testCorporationId1,
         quoteAssetId: usdAssetId,
       };
 
@@ -196,19 +196,19 @@ describe("Exchange (e2e)", () => {
         side: "bid",
         price: 50000,
         quantity: 1.5,
-        userId: testUserId1,
+        corporationId: testCorporationId1,
       });
     });
 
     it("should place a sell order (ask) without matching", async () => {
       // Create base asset holdings for ASK order
-      await TestCleanupHelper.createTestAssetHolding(app, testUserId2, btcAssetId, 2.0);
+      await TestCleanupHelper.createTestAssetHolding(app, testCorporationId2, btcAssetId, 2.0);
 
       const orderData = {
         side: "ask" as const,
         price: 51000,
         quantity: 2.0,
-        userId: testUserId2,
+        corporationId: testCorporationId2,
         quoteAssetId: usdAssetId,
       };
 
@@ -227,7 +227,7 @@ describe("Exchange (e2e)", () => {
         side: "ask",
         price: 51000,
         quantity: 2.0,
-        userId: testUserId2,
+        corporationId: testCorporationId2,
       });
     });
 
@@ -257,14 +257,14 @@ describe("Exchange (e2e)", () => {
           side: "bid" as const,
           price: 49500,
           quantity: 1.0,
-          userId: testUserId1,
+          corporationId: testCorporationId1,
           quoteAssetId: usdAssetId,
         },
         {
           side: "bid" as const,
           price: 49000,
           quantity: 2.0,
-          userId: testUserId1,
+          corporationId: testCorporationId1,
           quoteAssetId: usdAssetId,
         },
       ];
@@ -275,14 +275,14 @@ describe("Exchange (e2e)", () => {
           side: "ask" as const,
           price: 51500,
           quantity: 1.5,
-          userId: testUserId2,
+          corporationId: testCorporationId2,
           quoteAssetId: usdAssetId,
         },
         {
           side: "ask" as const,
           price: 52000,
           quantity: 3.0,
-          userId: testUserId2,
+          corporationId: testCorporationId2,
           quoteAssetId: usdAssetId,
         },
       ];
@@ -292,7 +292,7 @@ describe("Exchange (e2e)", () => {
       // So we need to create additional holdings for the new orders (1.5 + 3.0 = 4.5)
       // Plus we need to account for the already reserved 2.0, so total needed is 6.5
       const totalAskQuantity = 2.0 + 1.5 + 3.0; // Reserved from previous test + new orders
-      await TestCleanupHelper.createTestAssetHolding(app, testUserId2, btcAssetId, totalAskQuantity);
+      await TestCleanupHelper.createTestAssetHolding(app, testCorporationId2, btcAssetId, totalAskQuantity);
 
       // Place all buy orders
       for (const order of buyOrders) {
@@ -333,7 +333,7 @@ describe("Exchange (e2e)", () => {
         side: "bid" as const,
         price: 51000, // This should match with the ask at 51000
         quantity: 1.0, // Partial fill of the 2.0 ask
-        userId: testUserId1,
+        corporationId: testCorporationId1,
         quoteAssetId: usdAssetId,
       };
 
@@ -380,7 +380,7 @@ describe("Exchange (e2e)", () => {
         side: "bid" as const,
         price: 51000,
         quantity: 1.0, // This should completely fill the remaining 1.0 ask
-        userId: testUserId1,
+        corporationId: testCorporationId1,
         quoteAssetId: usdAssetId,
       };
 
@@ -458,7 +458,7 @@ describe("Exchange (e2e)", () => {
         side: "invalid",
         price: -100,
         quantity: 0,
-        userId: testUserId1,
+        corporationId: testCorporationId1,
         quoteAssetId: usdAssetId,
       };
 
@@ -474,7 +474,7 @@ describe("Exchange (e2e)", () => {
         side: "bid" as const,
         price: 50000,
         quantity: 1.0,
-        userId: testUserId1,
+        corporationId: testCorporationId1,
         quoteAssetId: usdAssetId,
       };
 

@@ -20,21 +20,21 @@ import { UpdateHoldingDto } from "../dtos/update-holding.dto";
 export class HoldingController {
   constructor(private readonly holdingService: HoldingService) {}
 
-  @Get("user/:userId")
-  @ApiOperation({ summary: "Get all holdings for a user" })
-  @ApiParam({ name: "userId", description: "User ID" })
+  @Get("corporation/:corporationId")
+  @ApiOperation({ summary: "Get all holdings for a corporation" })
+  @ApiParam({ name: "corporationId", description: "Corporation ID" })
   @ApiResponse({
     status: 200,
     description: "List of holdings",
     type: [HoldingDto],
   })
-  async getHoldingsByUserId(@Param("userId") userId: string): Promise<HoldingDto[]> {
-    return await this.holdingService.getHoldingsByUserId(userId);
+  async getHoldingsByCorporationId(@Param("corporationId") corporationId: string): Promise<HoldingDto[]> {
+    return await this.holdingService.getHoldingsByCorporationId(corporationId);
   }
 
-  @Get("user/:userId/asset/:assetId")
-  @ApiOperation({ summary: "Get a specific holding by user ID and asset ID" })
-  @ApiParam({ name: "userId", description: "User ID" })
+  @Get("corporation/:corporationId/asset/:assetId")
+  @ApiOperation({ summary: "Get a specific holding by corporation ID and asset ID" })
+  @ApiParam({ name: "corporationId", description: "Corporation ID" })
   @ApiParam({ name: "assetId", description: "Asset ID" })
   @ApiResponse({
     status: 200,
@@ -43,12 +43,12 @@ export class HoldingController {
   })
   @ApiResponse({ status: 404, description: "Holding not found" })
   async getHolding(
-    @Param("userId") userId: string,
+    @Param("corporationId") corporationId: string,
     @Param("assetId") assetId: string,
   ): Promise<HoldingDto> {
-    const holding = await this.holdingService.getHolding(userId, assetId);
+    const holding = await this.holdingService.getHolding(corporationId, assetId);
     if (!holding) {
-      throw new NotFoundException(`Holding not found for user ${userId} and asset ${assetId}`);
+      throw new NotFoundException(`Holding not found for corporation ${corporationId} and asset ${assetId}`);
     }
     return holding;
   }
@@ -62,49 +62,49 @@ export class HoldingController {
   })
   async upsertHolding(@Body() createHoldingDto: CreateHoldingDto): Promise<{ success: boolean }> {
     const success = await this.holdingService.upsertHolding(
-      createHoldingDto.userId,
+      createHoldingDto.corporationId,
       createHoldingDto.assetId,
       createHoldingDto.quantity,
     );
     return { success };
   }
 
-  @Put("user/:userId/asset/:assetId/quantity")
+  @Put("corporation/:corporationId/asset/:assetId/quantity")
   @ApiOperation({ summary: "Set holding quantity to a specific value" })
-  @ApiParam({ name: "userId", description: "User ID" })
+  @ApiParam({ name: "corporationId", description: "Corporation ID" })
   @ApiParam({ name: "assetId", description: "Asset ID" })
   @ApiResponse({
     status: 200,
     description: "Holding quantity updated successfully",
   })
   async setHoldingQuantity(
-    @Param("userId") userId: string,
+    @Param("corporationId") corporationId: string,
     @Param("assetId") assetId: string,
     @Body() updateDto: { quantity: number },
   ): Promise<{ success: boolean }> {
     const success = await this.holdingService.setHoldingQuantity(
-      userId,
+      corporationId,
       assetId,
       updateDto.quantity,
     );
     return { success };
   }
 
-  @Put("user/:userId/asset/:assetId/adjust")
+  @Put("corporation/:corporationId/asset/:assetId/adjust")
   @ApiOperation({ summary: "Adjust holding quantity by a delta amount" })
-  @ApiParam({ name: "userId", description: "User ID" })
+  @ApiParam({ name: "corporationId", description: "Corporation ID" })
   @ApiParam({ name: "assetId", description: "Asset ID" })
   @ApiResponse({
     status: 200,
     description: "Holding quantity adjusted successfully",
   })
   async adjustHoldingQuantity(
-    @Param("userId") userId: string,
+    @Param("corporationId") corporationId: string,
     @Param("assetId") assetId: string,
     @Body() updateDto: { deltaQuantity: number },
   ): Promise<{ success: boolean }> {
     const success = await this.holdingService.adjustHoldingQuantity(
-      userId,
+      corporationId,
       assetId,
       updateDto.deltaQuantity,
     );

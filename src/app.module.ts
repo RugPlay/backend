@@ -10,6 +10,8 @@ import { SocketModule } from "@/modules/socket/socket.module";
 import { ExchangeModule } from "@/modules/exchange/exchange.module";
 import { AssetsModule } from "@/modules/assets/assets.module";
 import { AnalyticsModule } from "@/modules/analytics/analytics.module";
+import { BusinessesModule } from "@/modules/businesses/businesses.module";
+import { CorporationsModule } from "@/modules/corporations/corporations.module";
 import { AllExceptionFilter } from "@/filters/all-exception.filter";
 import cookieConfig from "@/config/cookie.config";
 import { CacheModule } from "@nestjs/cache-manager";
@@ -78,6 +80,8 @@ import { PostgresDialect } from "kysely";
     ExchangeModule,
     AssetsModule,
     AnalyticsModule,
+    CorporationsModule,
+    BusinessesModule,
   ],
   providers: [
     {

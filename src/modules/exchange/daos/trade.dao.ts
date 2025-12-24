@@ -31,8 +31,8 @@ export class TradeDao extends KyselyDao<TradeDao> {
           price: trade.price.toString(),
           taker_holding_id: trade.takerHoldingId || null,
           maker_holding_id: trade.makerHoldingId || null,
-          taker_user_id: trade.takerUserId || null,
-          maker_user_id: trade.makerUserId || null,
+          taker_corporation_id: trade.takerCorporationId || null,
+          maker_corporation_id: trade.makerCorporationId || null,
         } as any)
         .returning('id')
         .executeTakeFirst();
@@ -211,8 +211,8 @@ export class TradeDao extends KyselyDao<TradeDao> {
         price: trade.price.toString(),
         taker_holding_id: (trade as any).takerHoldingId || null,
         maker_holding_id: (trade as any).makerHoldingId || null,
-        taker_user_id: (trade as any).takerUserId || null,
-        maker_user_id: (trade as any).makerUserId || null,
+        taker_corporation_id: (trade as any).takerCorporationId || null,
+        maker_corporation_id: (trade as any).makerCorporationId || null,
         created_at: trade.timestamp,
       }));
 
@@ -296,8 +296,8 @@ export class TradeDao extends KyselyDao<TradeDao> {
     dto.price = parseFloat(record.price);
     dto.takerHoldingId = record.taker_holding_id;
     dto.makerHoldingId = record.maker_holding_id;
-    dto.takerUserId = record.taker_user_id;
-    dto.makerUserId = record.maker_user_id;
+    dto.takerCorporationId = record.taker_corporation_id;
+    dto.makerCorporationId = record.maker_corporation_id;
     dto.createdAt = record.created_at;
     dto.updatedAt = record.updated_at;
     return dto;

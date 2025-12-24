@@ -14,7 +14,7 @@ describe("OrderService (e2e)", () => {
   let marketService: MarketService;
   let assetService: AssetService;
   let testMarketId: string;
-  let testUserId: string;
+  let testCorporationId: string;
   let usdAssetId: string;
   let testAssetId: string;
 
@@ -44,8 +44,8 @@ describe("OrderService (e2e)", () => {
   });
 
   async function setupTestData() {
-    // Create test user ID
-    testUserId = uuidv4();
+    // Create test corporation
+    testCorporationId = await TestCleanupHelper.createTestCorporation(app, `Test Corp ${Date.now()}`);
 
     // Create test assets
     const usdAsset = await assetService.createAsset({
@@ -67,7 +67,7 @@ describe("OrderService (e2e)", () => {
     testAssetId = testAsset.id;
 
     // Give user initial USD holdings for trading
-    await TestCleanupHelper.createTestAssetHolding(app, testUserId, usdAssetId, 1000000);
+    await TestCleanupHelper.createTestAssetHolding(app, testCorporationId, usdAssetId, 1000000);
 
     // Create a test market
     const market = await marketService.createMarket({
@@ -123,7 +123,7 @@ describe("OrderService (e2e)", () => {
         side: "bid",
         price: 50000,
         quantity: 1.5,
-        userId: testUserId,
+        corporationId: testCorporationId,
         quoteAssetId: usdAssetId,
       };
 
@@ -143,7 +143,7 @@ describe("OrderService (e2e)", () => {
 
     it("should add a sell order to the order book", async () => {
       // Create base asset holdings for ASK order
-      await TestCleanupHelper.createTestAssetHolding(app, testUserId, testAssetId, 2.0);
+      await TestCleanupHelper.createTestAssetHolding(app, testCorporationId, testAssetId, 2.0);
 
       const order: Omit<OrderBookEntryDto, "timestamp"> = {
         marketId: testMarketId,
@@ -151,7 +151,7 @@ describe("OrderService (e2e)", () => {
         side: "ask",
         price: 51000,
         quantity: 2.0,
-        userId: testUserId,
+        corporationId: testCorporationId,
         quoteAssetId: usdAssetId,
       };
 
@@ -178,7 +178,7 @@ describe("OrderService (e2e)", () => {
 
     it("should match orders with exact price and quantity", async () => {
       // Create base asset holdings for the ask order
-      await TestCleanupHelper.createTestAssetHolding(app, testUserId, testAssetId, 1.0);
+      await TestCleanupHelper.createTestAssetHolding(app, testCorporationId, testAssetId, 1.0);
 
       // Add a sell order first (using addOrderWithMatching so it's saved to database)
       const sellOrder: Omit<OrderBookEntryDto, "timestamp"> = {
@@ -187,7 +187,7 @@ describe("OrderService (e2e)", () => {
         side: "ask",
         price: 50000,
         quantity: 1.0,
-        userId: testUserId,
+        corporationId: testCorporationId,
         quoteAssetId: usdAssetId,
       };
 
@@ -202,7 +202,7 @@ describe("OrderService (e2e)", () => {
         side: "bid",
         price: 50000,
         quantity: 1.0,
-        userId: testUserId,
+        corporationId: testCorporationId,
         quoteAssetId: usdAssetId,
       };
 
@@ -222,7 +222,7 @@ describe("OrderService (e2e)", () => {
 
     it("should handle partial fills", async () => {
       // Create base asset holdings for the ask order
-      await TestCleanupHelper.createTestAssetHolding(app, testUserId, testAssetId, 5.0);
+      await TestCleanupHelper.createTestAssetHolding(app, testCorporationId, testAssetId, 5.0);
 
       // Add a large sell order (using addOrderWithMatching so it's saved to database)
       const sellOrder: Omit<OrderBookEntryDto, "timestamp"> = {
@@ -231,7 +231,7 @@ describe("OrderService (e2e)", () => {
         side: "ask",
         price: 50000,
         quantity: 5.0,
-        userId: testUserId,
+        corporationId: testCorporationId,
         quoteAssetId: usdAssetId,
       };
 
@@ -246,7 +246,7 @@ describe("OrderService (e2e)", () => {
         side: "bid",
         price: 50000,
         quantity: 2.0,
-        userId: testUserId,
+        corporationId: testCorporationId,
         quoteAssetId: usdAssetId,
       };
 
@@ -263,7 +263,7 @@ describe("OrderService (e2e)", () => {
 
     it("should handle multiple matches", async () => {
       // Create base asset holdings for the ask orders (1.0 + 1.5 = 2.5)
-      await TestCleanupHelper.createTestAssetHolding(app, testUserId, testAssetId, 2.5);
+      await TestCleanupHelper.createTestAssetHolding(app, testCorporationId, testAssetId, 2.5);
 
       // Add multiple sell orders at the same price (using addOrderWithMatching so they're saved to database)
       const sellOrders = [
@@ -273,7 +273,7 @@ describe("OrderService (e2e)", () => {
           side: "ask" as const,
           price: 50000,
           quantity: 1.0,
-          userId: testUserId,
+          corporationId: testCorporationId,
           quoteAssetId: usdAssetId,
         },
         {
@@ -282,7 +282,7 @@ describe("OrderService (e2e)", () => {
           side: "ask" as const,
           price: 50000,
           quantity: 1.5,
-          userId: testUserId,
+          corporationId: testCorporationId,
           quoteAssetId: usdAssetId,
         },
       ];
@@ -301,7 +301,7 @@ describe("OrderService (e2e)", () => {
         side: "bid",
         price: 50000,
         quantity: 2.5,
-        userId: testUserId,
+        corporationId: testCorporationId,
         quoteAssetId: usdAssetId,
       };
 
@@ -328,7 +328,7 @@ describe("OrderService (e2e)", () => {
 
     it("should match orders by price priority", async () => {
       // Create base asset holdings for the ask orders (1.0 + 1.0 = 2.0)
-      await TestCleanupHelper.createTestAssetHolding(app, testUserId, testAssetId, 2.0);
+      await TestCleanupHelper.createTestAssetHolding(app, testCorporationId, testAssetId, 2.0);
 
       // Add sell orders at different prices (using addOrderWithMatching so they're saved to database)
       const sellOrders = [
@@ -338,7 +338,7 @@ describe("OrderService (e2e)", () => {
           side: "ask" as const,
           price: 50100, // Higher price
           quantity: 1.0,
-          userId: testUserId,
+          corporationId: testCorporationId,
           quoteAssetId: usdAssetId,
         },
         {
@@ -347,7 +347,7 @@ describe("OrderService (e2e)", () => {
           side: "ask" as const,
           price: 50000, // Lower price (should match first)
           quantity: 1.0,
-          userId: testUserId,
+          corporationId: testCorporationId,
           quoteAssetId: usdAssetId,
         },
       ];
@@ -366,7 +366,7 @@ describe("OrderService (e2e)", () => {
         side: "bid",
         price: 50050, // Between the two sell prices
         quantity: 1.0,
-        userId: testUserId,
+        corporationId: testCorporationId,
         quoteAssetId: usdAssetId,
       };
 
@@ -392,7 +392,7 @@ describe("OrderService (e2e)", () => {
         side: "bid",
         price: 49000,
         quantity: 2.0,
-        userId: testUserId,
+        corporationId: testCorporationId,
         quoteAssetId: usdAssetId,
       };
 
@@ -426,7 +426,7 @@ describe("OrderService (e2e)", () => {
         side: "bid",
         price: 50000,
         quantity: 1.0,
-        userId: "invalid-user-id",
+          corporationId: "invalid-corporation-id",
         quoteAssetId: usdAssetId,
       };
 

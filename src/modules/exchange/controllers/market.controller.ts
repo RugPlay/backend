@@ -292,8 +292,8 @@ export class MarketController {
         price: trade.price,
         timestamp: trade.timestamp || trade.createdAt,
         createdAt: trade.createdAt, // Include createdAt for backward compatibility
-        takerUserId: trade.takerUserId,
-        makerUserId: trade.makerUserId,
+        takerCorporationId: trade.takerCorporationId,
+        makerCorporationId: trade.makerCorporationId,
       }));
     } catch (error) {
       if (error instanceof HttpException) {

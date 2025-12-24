@@ -22,7 +22,7 @@ describe("Analytics Integration (e2e)", () => {
   let holdingService: HoldingService;
   
   let testMarketId: string;
-  let testUserIds: string[];
+  let testCorporationIds: string[];
   let usdAssetId: string;
   let btcAssetId: string;
   let ethAssetId: string;
@@ -150,8 +150,12 @@ describe("Analytics Integration (e2e)", () => {
   });
 
   async function setupTestData() {
-    // Create multiple test users
-    testUserIds = Array.from({ length: 5 }, () => `test_user_${uuidv4()}`);
+    // Create multiple test corporations
+    testCorporationIds = [];
+    for (let i = 0; i < 5; i++) {
+      const corpId = await TestCleanupHelper.createTestCorporation(app, `Test Corp ${i} ${Date.now()}`);
+      testCorporationIds.push(corpId);
+    }
 
     // Create test assets
     const assets = await TestCleanupHelper.createTestAssets(app);
@@ -168,9 +172,9 @@ describe("Analytics Integration (e2e)", () => {
     });
     ethAssetId = ethAsset?.id || "";
 
-    // Give users initial USD holdings
-    for (const userId of testUserIds) {
-      await TestCleanupHelper.createTestAssetHolding(app, userId, usdAssetId, 1000000);
+    // Give corporations initial USD holdings
+    for (const corporationId of testCorporationIds) {
+      await TestCleanupHelper.createTestAssetHolding(app, corporationId, usdAssetId, 1000000);
     }
 
     // Create test market
@@ -195,8 +199,8 @@ describe("Analytics Integration (e2e)", () => {
 
   async function createLargeDataset() {
     // Create base asset holdings for ask orders
-    for (const userId of testUserIds) {
-      await TestCleanupHelper.createTestAssetHolding(app, userId, btcAssetId, 10.0);
+    for (const corporationId of testCorporationIds) {
+      await TestCleanupHelper.createTestAssetHolding(app, corporationId, btcAssetId, 10.0);
     }
 
     // Create many trades over time to test time bucketing
@@ -207,8 +211,8 @@ describe("Analytics Integration (e2e)", () => {
     for (let i = 0; i < 20; i++) {
       const price = basePrice + priceVariations[i % priceVariations.length];
       const quantity = quantities[i % quantities.length];
-      const userId1 = testUserIds[i % testUserIds.length];
-      const userId2 = testUserIds[(i + 1) % testUserIds.length];
+      const corporationId1 = testCorporationIds[i % testCorporationIds.length];
+      const corporationId2 = testCorporationIds[(i + 1) % testCorporationIds.length];
 
       // Create ask order first
       const askOrder: Omit<OrderBookEntryDto, "timestamp"> = {
@@ -217,7 +221,7 @@ describe("Analytics Integration (e2e)", () => {
         side: "ask",
         price,
         quantity,
-        userId: userId2,
+        corporationId: corporationId2,
         quoteAssetId: usdAssetId,
       };
 
@@ -230,7 +234,7 @@ describe("Analytics Integration (e2e)", () => {
         side: "bid",
         price,
         quantity,
-        userId: userId1,
+        corporationId: corporationId1,
         quoteAssetId: usdAssetId,
       };
 
@@ -241,9 +245,9 @@ describe("Analytics Integration (e2e)", () => {
     }
 
     // Create holdings for different users
-    for (let i = 0; i < testUserIds.length; i++) {
-      await holdingService.upsertHolding(testUserIds[i], btcAssetId, (i + 1) * 2.0);
-      await holdingService.upsertHolding(testUserIds[i], ethAssetId, (i + 1) * 5.0);
+    for (let i = 0; i < testCorporationIds.length; i++) {
+      await holdingService.upsertHolding(testCorporationIds[i], btcAssetId, (i + 1) * 2.0);
+      await holdingService.upsertHolding(testCorporationIds[i], ethAssetId, (i + 1) * 5.0);
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
   }
@@ -402,7 +406,7 @@ describe("Analytics Integration (e2e)", () => {
         .get("/analytics/holdings/production")
         .query({
           interval: TimeBucketInterval.ONE_HOUR,
-          userId: testUserIds[0],
+          corporationId: testCorporationIds[0],
         })
         .expect(200);
 

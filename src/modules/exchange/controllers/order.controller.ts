@@ -226,7 +226,7 @@ export class OrderController {
         side: orderRequest.side,
         price: orderRequest.price,
         quantity: orderRequest.quantity,
-        userId: orderRequest.userId,
+        corporationId: orderRequest.corporationId,
         quoteAssetId: orderRequest.quoteAssetId,
       };
 
@@ -253,7 +253,7 @@ export class OrderController {
               marketId: result.remainingOrder.marketId,
               price: result.remainingOrder.price,
               quantity: result.remainingOrder.quantity,
-              userId: result.remainingOrder.userId,
+              corporationId: result.remainingOrder.corporationId,
               quoteAssetId: result.remainingOrder.quoteAssetId,
               timestamp: result.remainingOrder.timestamp,
               orderId: result.remainingOrder.orderId,

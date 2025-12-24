@@ -22,8 +22,8 @@ describe("Analytics (e2e)", () => {
   let holdingService: HoldingService;
   
   let testMarketId: string;
-  let testUserId1: string;
-  let testUserId2: string;
+  let testCorporationId1: string;
+  let testCorporationId2: string;
   let usdAssetId: string;
   let btcAssetId: string;
   let ethAssetId: string;
@@ -152,9 +152,9 @@ describe("Analytics (e2e)", () => {
   });
 
   async function setupTestData() {
-    // Create test user IDs
-    testUserId1 = `test_user_${uuidv4()}`;
-    testUserId2 = `test_user_${uuidv4()}`;
+    // Create test corporations
+    testCorporationId1 = await TestCleanupHelper.createTestCorporation(app, `Test Corp 1 ${Date.now()}`);
+    testCorporationId2 = await TestCleanupHelper.createTestCorporation(app, `Test Corp 2 ${Date.now()}`);
 
     // Create test assets
     const assets = await TestCleanupHelper.createTestAssets(app);
@@ -171,9 +171,9 @@ describe("Analytics (e2e)", () => {
     });
     ethAssetId = ethAsset?.id || "";
 
-    // Give users initial USD holdings for trading
-    await TestCleanupHelper.createTestAssetHolding(app, testUserId1, usdAssetId, 1000000);
-    await TestCleanupHelper.createTestAssetHolding(app, testUserId2, usdAssetId, 1000000);
+    // Give corporations initial USD holdings for trading
+    await TestCleanupHelper.createTestAssetHolding(app, testCorporationId1, usdAssetId, 1000000);
+    await TestCleanupHelper.createTestAssetHolding(app, testCorporationId2, usdAssetId, 1000000);
 
     // Create a test market
     const market = await marketService.createMarket({
@@ -197,7 +197,7 @@ describe("Analytics (e2e)", () => {
 
   async function createTestTrades() {
     // Create base asset holdings for ask orders
-    await TestCleanupHelper.createTestAssetHolding(app, testUserId2, btcAssetId, 10.0);
+    await TestCleanupHelper.createTestAssetHolding(app, testCorporationId2, btcAssetId, 10.0);
 
     // Create multiple trades with different timestamps to test time bucketing
     const prices = [50000, 50100, 50200, 50300, 50400, 50500];
@@ -211,7 +211,7 @@ describe("Analytics (e2e)", () => {
         side: "ask",
         price: prices[i],
         quantity: quantities[i],
-        userId: testUserId2,
+        corporationId: testCorporationId2,
         quoteAssetId: usdAssetId,
       };
 
@@ -224,7 +224,7 @@ describe("Analytics (e2e)", () => {
         side: "bid",
         price: prices[i],
         quantity: quantities[i],
-        userId: testUserId1,
+        corporationId: testCorporationId1,
         quoteAssetId: usdAssetId,
       };
 
@@ -237,10 +237,10 @@ describe("Analytics (e2e)", () => {
 
   async function createTestHoldings() {
     // Create holdings for different users and assets
-    await holdingService.upsertHolding(testUserId1, btcAssetId, 5.0);
-    await holdingService.upsertHolding(testUserId1, ethAssetId, 10.0);
-    await holdingService.upsertHolding(testUserId2, btcAssetId, 3.0);
-    await holdingService.upsertHolding(testUserId2, ethAssetId, 7.0);
+    await holdingService.upsertHolding(testCorporationId1, btcAssetId, 5.0);
+    await holdingService.upsertHolding(testCorporationId1, ethAssetId, 10.0);
+    await holdingService.upsertHolding(testCorporationId2, btcAssetId, 3.0);
+    await holdingService.upsertHolding(testCorporationId2, ethAssetId, 7.0);
 
     // Small delay to ensure different timestamps
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -531,12 +531,12 @@ describe("Analytics (e2e)", () => {
         }
       });
 
-      it("should get holdings production data filtered by userId", async () => {
+      it("should get holdings production data filtered by corporationId", async () => {
         const response = await request(app.getHttpServer())
           .get("/analytics/holdings/production")
           .query({
             interval: TimeBucketInterval.ONE_HOUR,
-            userId: testUserId1,
+            corporationId: testCorporationId1,
           })
           .expect(200);
 
@@ -604,7 +604,7 @@ describe("Analytics (e2e)", () => {
           .get("/analytics/holdings/growth")
           .query({
             interval: TimeBucketInterval.ONE_HOUR,
-            userId: testUserId1,
+            corporationId: testCorporationId1,
             assetId: btcAssetId,
           })
           .expect(200);
@@ -643,10 +643,10 @@ describe("Analytics (e2e)", () => {
         expect(count).toBeGreaterThanOrEqual(0);
       });
 
-      it("should get total holdings count filtered by userId", async () => {
+      it("should get total holdings count filtered by corporationId", async () => {
         const response = await request(app.getHttpServer())
           .get("/analytics/holdings/count")
-          .query({ userId: testUserId1 })
+          .query({ corporationId: testCorporationId1 })
           .expect(200);
 
         let count: number;

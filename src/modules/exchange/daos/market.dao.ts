@@ -92,7 +92,7 @@ export class MarketDao extends KyselyDao<MarketDao> {
         .selectAll();
 
       if (filters?.category) {
-        query = query.where('category', '=', filters.category);
+        query = query.where('category', '=', filters.category as any);
       }
 
       if (filters?.baseAsset) {
@@ -130,12 +130,12 @@ export class MarketDao extends KyselyDao<MarketDao> {
   /**
    * Get markets by category
    */
-  async getMarketsByCategory(category: string): Promise<MarketDto[]> {
+  async getMarketsByCategory(category: MarketCategory): Promise<MarketDto[]> {
     try {
       const results = await this.kysely
         .selectFrom('markets')
         .selectAll()
-        .where('category', '=', category)
+        .where('category', '=', category as any)
         .orderBy('symbol', 'asc')
         .execute();
       return results.map((record) => this.mapRecordToDto(record));

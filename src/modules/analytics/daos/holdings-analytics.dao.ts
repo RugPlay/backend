@@ -19,8 +19,8 @@ export class HoldingsAnalyticsDao extends KyselyDao<HoldingsAnalyticsDao> {
       // Build WHERE conditions for created query
       const createdConditions: any[] = [];
       
-      if (query.userId) {
-        createdConditions.push(sql`user_id = ${query.userId}`);
+      if (query.corporationId) {
+        createdConditions.push(sql`corporation_id = ${query.corporationId}`);
       }
       
       if (query.assetId) {
@@ -48,8 +48,8 @@ export class HoldingsAnalyticsDao extends KyselyDao<HoldingsAnalyticsDao> {
       // Query for holdings removed (quantity = 0)
       const removedConditions: any[] = [sql`quantity = 0`];
       
-      if (query.userId) {
-        removedConditions.push(sql`user_id = ${query.userId}`);
+      if (query.corporationId) {
+        removedConditions.push(sql`corporation_id = ${query.corporationId}`);
       }
       
       if (query.assetId) {
@@ -115,8 +115,8 @@ export class HoldingsAnalyticsDao extends KyselyDao<HoldingsAnalyticsDao> {
       // Get initial total holdings count (before startTime if specified)
       const initialConditions: any[] = [];
       
-      if (query.userId) {
-        initialConditions.push(sql`user_id = ${query.userId}`);
+      if (query.corporationId) {
+        initialConditions.push(sql`corporation_id = ${query.corporationId}`);
       }
       
       if (query.assetId) {
@@ -177,7 +177,7 @@ export class HoldingsAnalyticsDao extends KyselyDao<HoldingsAnalyticsDao> {
    */
   async getHoldingsGrowthData(
     interval: TimeBucketInterval,
-    userId?: string,
+    corporationId?: string,
     assetId?: string,
     startTime?: Date,
     endTime?: Date,
@@ -187,8 +187,8 @@ export class HoldingsAnalyticsDao extends KyselyDao<HoldingsAnalyticsDao> {
       // Build WHERE conditions
       const conditions: any[] = [];
       
-      if (userId) {
-        conditions.push(sql`user_id = ${userId}`);
+      if (corporationId) {
+        conditions.push(sql`corporation_id = ${corporationId}`);
       }
       
       if (assetId) {
@@ -260,7 +260,7 @@ export class HoldingsAnalyticsDao extends KyselyDao<HoldingsAnalyticsDao> {
    * Get total holdings count at a specific point in time
    */
   async getTotalHoldingsCount(
-    userId?: string,
+    corporationId?: string,
     assetId?: string,
     atTime?: Date,
   ): Promise<number> {
@@ -269,8 +269,8 @@ export class HoldingsAnalyticsDao extends KyselyDao<HoldingsAnalyticsDao> {
         .selectFrom("holdings")
         .select(sql<number>`COUNT(*)`.as("count"));
 
-      if (userId) {
-        query = query.where("user_id", "=", userId);
+      if (corporationId) {
+        query = query.where("corporation_id", "=", corporationId);
       }
 
       if (assetId) {

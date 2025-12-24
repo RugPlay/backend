@@ -6,6 +6,8 @@
 import type { ColumnType } from "kysely";
 import type { IPostgresInterval } from "postgres-interval";
 
+export type CategoryEnum = "bonds" | "commodities" | "crypto" | "forex" | "futures" | "indices" | "stocks";
+
 export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
@@ -27,6 +29,8 @@ export type JsonPrimitive = boolean | number | string | null;
 export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
 
 export type Numeric = ColumnType<string, number | string, number | string>;
+
+export type OrderSideEnum = "ask" | "bid";
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
@@ -302,83 +306,81 @@ export interface _TimescaledbInternalHypertableChunkLocalSize {
 }
 
 export interface Assets {
-  id: Generated<string>;
-  symbol: string;
-  name: string;
-  type: string;
+  created_at: Generated<Timestamp | null>;
   decimals: Generated<number>;
+  id: Generated<string>;
   is_active: Generated<boolean>;
+  name: string;
+  symbol: string;
+  type: string;
+  updated_at: Generated<Timestamp | null>;
+}
+
+export interface Businesses {
+  category: string;
+  corporation_id: string;
   created_at: Generated<Timestamp>;
+  description: string | null;
+  id: Generated<string>;
+  is_active: Generated<boolean>;
+  name: string;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface Corporations {
+  created_at: Generated<Timestamp>;
+  description: string | null;
+  id: Generated<string>;
+  industry: string;
+  is_active: Generated<boolean>;
+  name: string;
   updated_at: Generated<Timestamp>;
 }
 
 export interface Holdings {
-  id: Generated<string>;
-  user_id: string;
   asset_id: string;
-  quantity: Generated<Numeric>;
   average_cost_basis: Generated<Numeric>;
-  total_cost: Generated<Numeric>;
+  corporation_id: string;
   created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  quantity: Generated<Numeric>;
+  total_cost: Generated<Numeric>;
   updated_at: Generated<Timestamp>;
 }
 
 export interface Markets {
-  id: Generated<string>;
-  name: string;
-  symbol: string;
-  category: string;
+  base_asset: string;
   base_asset_id: string;
-  quote_asset_id: string;
+  category: CategoryEnum;
+  created_at: Generated<Timestamp | null>;
+  id: Generated<string>;
+  is_24h: Generated<boolean>;
+  is_active: Generated<boolean>;
+  max_quantity: Numeric | null;
+  metadata: Json | null;
   min_price_increment: Generated<Numeric>;
   min_quantity_increment: Generated<Numeric>;
-  max_quantity: Numeric | null;
-  is_active: Generated<boolean>;
-  is_24h: Generated<boolean>;
-  timezone: Generated<string>;
-  trading_start: string | null;
+  name: string;
+  quote_asset: string;
+  quote_asset_id: string;
+  subcategory: string | null;
+  symbol: string;
+  timezone: Generated<string | null>;
   trading_end: string | null;
-  metadata: Json | null;
-  created_at: Generated<Timestamp>;
-  updated_at: Generated<Timestamp>;
+  trading_start: string | null;
+  updated_at: Generated<Timestamp | null>;
 }
 
 export interface Orders {
+  corporation_id: string;
+  created_at: Generated<Timestamp>;
   id: Generated<string>;
   market_id: string;
-  user_id: string;
-  quote_asset_id: string;
-  side: string;
   price: Numeric;
   quantity: Numeric;
-  filled_quantity: Generated<Numeric>;
-  order_type: Generated<string>;
-  status: Generated<string>;
-  created_at: Generated<Timestamp>;
+  quote_asset_id: string;
+  side: OrderSideEnum;
   updated_at: Generated<Timestamp>;
-}
-
-export interface Portfolios {
-  balance: Generated<Numeric>;
-  created_at: Generated<Timestamp>;
-  id: Generated<string>;
-  type: Generated<string>;
-  updated_at: Generated<Timestamp>;
-  user_id: string;
-}
-
-export interface Profiles {
-  avatar_url: string | null;
-  bio: string | null;
-  created_at: Generated<Timestamp>;
-  display_name: string | null;
-  email: string | null;
-  id: Generated<string>;
-  identity_id: string;
-  is_active: Generated<boolean>;
-  metadata: Json | null;
-  updated_at: Generated<Timestamp>;
-  username: string | null;
 }
 
 export interface TimescaledbExperimentalPolicies {
@@ -533,18 +535,18 @@ export interface TimescaledbInformationJobStats {
 export interface Trades {
   created_at: Generated<Timestamp>;
   id: Generated<string>;
+  maker_corporation_id: string;
   maker_holding_id: string | null;
   maker_order_id: string;
-  maker_user_id: string | null;
   market_id: string;
   price: Numeric;
   quantity: Numeric;
+  taker_corporation_id: string;
   taker_holding_id: string | null;
   taker_order_id: string;
-  taker_side: string;
-  taker_user_id: string | null;
+  taker_side: OrderSideEnum;
   trade_id: string;
-  type: string;
+  type: Generated<string>;
   updated_at: Generated<Timestamp>;
 }
 
@@ -577,11 +579,11 @@ export interface DB {
   "_timescaledb_internal.compressed_chunk_stats": _TimescaledbInternalCompressedChunkStats;
   "_timescaledb_internal.hypertable_chunk_local_size": _TimescaledbInternalHypertableChunkLocalSize;
   assets: Assets;
+  businesses: Businesses;
+  corporations: Corporations;
   holdings: Holdings;
   markets: Markets;
   orders: Orders;
-  portfolios: Portfolios;
-  profiles: Profiles;
   "timescaledb_experimental.policies": TimescaledbExperimentalPolicies;
   "timescaledb_information.chunk_compression_settings": TimescaledbInformationChunkCompressionSettings;
   "timescaledb_information.chunks": TimescaledbInformationChunks;

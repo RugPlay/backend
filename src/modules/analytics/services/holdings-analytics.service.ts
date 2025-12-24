@@ -29,7 +29,7 @@ export class HoldingsAnalyticsService {
    */
   async getHoldingsGrowthData(
     interval: TimeBucketInterval,
-    userId?: string,
+    corporationId?: string,
     assetId?: string,
     startTime?: Date,
     endTime?: Date,
@@ -38,7 +38,7 @@ export class HoldingsAnalyticsService {
     try {
       return await this.holdingsAnalyticsDao.getHoldingsGrowthData(
         interval,
-        userId,
+        corporationId,
         assetId,
         startTime,
         endTime,
@@ -54,12 +54,12 @@ export class HoldingsAnalyticsService {
    * Get total holdings count at a specific point in time
    */
   async getTotalHoldingsCount(
-    userId?: string,
+    corporationId?: string,
     assetId?: string,
     atTime?: Date,
   ): Promise<number> {
     try {
-      return await this.holdingsAnalyticsDao.getTotalHoldingsCount(userId, assetId, atTime);
+      return await this.holdingsAnalyticsDao.getTotalHoldingsCount(corporationId, assetId, atTime);
     } catch (error) {
       this.logger.error("Error getting total holdings count:", error);
       throw error;

@@ -20,6 +20,8 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "db": "npx dotenv -e .env -- npx kysely-ctl",
+    "db:migrate": "npm run db -- migrate:latest && npm run db:generate",
+    "db:rollback": "npm run db -- migrate:rollback --all",
     "db:generate": "npx dotenv -e .env -- npx kysely-codegen"
   },
   "dependencies": {

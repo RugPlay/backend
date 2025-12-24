@@ -48,11 +48,12 @@ export class PlaceOrderDto {
   quantity: number;
 
   @ApiProperty({
-    description: "The user ID placing the order",
-    example: "user_123e4567-e89b-12d3-a456-426614174000",
+    description: "The corporation ID placing the order",
+    example: "123e4567-e89b-12d3-a456-426614174000",
   })
-  @IsNotEmpty({ message: "User ID is required" })
-  userId: string;
+  @IsUUID(4, { message: "Corporation ID must be a valid UUID" })
+  @IsNotEmpty({ message: "Corporation ID is required" })
+  corporationId: string;
 
   @ApiProperty({
     description: "The quote asset ID for the order",

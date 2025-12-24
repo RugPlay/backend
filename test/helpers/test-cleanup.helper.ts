@@ -3,6 +3,7 @@ import { OrderService } from '../../src/modules/exchange/services/order.service'
 import { MarketService } from '../../src/modules/exchange/services/market.service';
 import { AssetService } from '../../src/modules/assets/services/asset.service';
 import { AssetHoldingDao } from '../../src/modules/assets/daos/asset-holding.dao';
+import { CorporationService } from '../../src/modules/corporations/services/corporation.service';
 import { Kysely, sql } from 'kysely';
 import { DB } from '../../src/database/types/db';
 import { REDIS_CLIENT } from '../../src/redis/constants/redis.constants';
@@ -42,6 +43,25 @@ export class TestCleanupHelper {
   }
 
   /**
+   * Create a test corporation
+   */
+  static async createTestCorporation(
+    app: INestApplication,
+    name: string = `Test Corp ${Date.now()}`
+  ): Promise<string> {
+    const corporationService = app.get(CorporationService);
+    
+    const corporation = await corporationService.createCorporation({
+      name,
+      description: 'Test corporation',
+      industry: 'technology',
+      isActive: true,
+    });
+
+    return corporation.id;
+  }
+
+  /**
    * Create test assets (USD and BTC for example)
    */
   static async createTestAssets(
@@ -74,95 +94,95 @@ export class TestCleanupHelper {
   }
 
   /**
-   * Create a test asset holding for a user
+   * Create a test asset holding for a corporation
    */
   static async createTestAssetHolding(
     app: INestApplication,
-    userId: string,
+    corporationId: string,
     assetId: string,
     quantity: number
   ): Promise<void> {
     const assetHoldingDao = app.get(AssetHoldingDao);
     
     const success = await assetHoldingDao.adjustAssetQuantity(
-      userId,
+      corporationId,
       assetId,
       quantity,
     );
 
     if (!success) {
-      throw new Error(`Failed to create test asset holding for user ${userId} with asset ${assetId}`);
+      throw new Error(`Failed to create test asset holding for corporation ${corporationId} with asset ${assetId}`);
     }
   }
 
   /**
-   * Ensure user has at least the specified asset quantity, adding more if needed
+   * Ensure corporation has at least the specified asset quantity, adding more if needed
    */
   static async ensureMinimumAssetQuantity(
     app: INestApplication,
-    userId: string,
+    corporationId: string,
     assetId: string,
     minimumQuantity: number
   ): Promise<void> {
     const assetHoldingDao = app.get(AssetHoldingDao);
-    const currentAsset = await assetHoldingDao.getAsset(userId, assetId);
+    const currentAsset = await assetHoldingDao.getAsset(corporationId, assetId);
     
     const currentQuantity = currentAsset?.quantity || 0;
 
     if (currentQuantity < minimumQuantity) {
       const needed = minimumQuantity - currentQuantity;
-      const success = await assetHoldingDao.adjustAssetQuantity(userId, assetId, needed);
+      const success = await assetHoldingDao.adjustAssetQuantity(corporationId, assetId, needed);
       if (!success) {
-        throw new Error(`Failed to adjust asset quantity for user ${userId} asset ${assetId}`);
+        throw new Error(`Failed to adjust asset quantity for corporation ${corporationId} asset ${assetId}`);
       }
     }
   }
 
   /**
-   * Reset user asset quantity to a specific amount
+   * Reset corporation asset quantity to a specific amount
    */
   static async resetAssetQuantity(
     app: INestApplication,
-    userId: string,
+    corporationId: string,
     assetId: string,
     targetQuantity: number
   ): Promise<void> {
     const assetHoldingDao = app.get(AssetHoldingDao);
-    const currentAsset = await assetHoldingDao.getAsset(userId, assetId);
+    const currentAsset = await assetHoldingDao.getAsset(corporationId, assetId);
     
     const currentQuantity = currentAsset?.quantity || 0;
 
     const difference = targetQuantity - currentQuantity;
     if (Math.abs(difference) > 0.01) {
-      const success = await assetHoldingDao.adjustAssetQuantity(userId, assetId, difference);
+      const success = await assetHoldingDao.adjustAssetQuantity(corporationId, assetId, difference);
       if (!success) {
-        throw new Error(`Failed to reset asset quantity for user ${userId} asset ${assetId} to ${targetQuantity}`);
+        throw new Error(`Failed to reset asset quantity for corporation ${corporationId} asset ${assetId} to ${targetQuantity}`);
       }
     }
   }
 
   /**
-   * Clear all assets for a user
+   * Clear all assets for a corporation
    */
-  static async clearUserAssets(
+  static async clearCorporationAssets(
     app: INestApplication,
-    userId: string
+    corporationId: string
   ): Promise<void> {
     const assetHoldingDao = app.get(AssetHoldingDao);
-    await assetHoldingDao.deleteUserAssets(userId);
+    await assetHoldingDao.deleteCorporationAssets(corporationId);
   }
 
   /**
-   * Reset user to a clean state (all assets)
+   * Reset corporation to a clean state (all assets)
    */
-  static async resetUser(
+  static async resetCorporation(
     app: INestApplication,
-    userId: string,
+    corporationId: string,
     assets: Array<{ assetId: string; quantity: number }>
   ): Promise<void> {
-    await this.clearUserAssets(app, userId);
+    await this.clearCorporationAssets(app, corporationId);
     for (const asset of assets) {
-      await this.resetAssetQuantity(app, userId, asset.assetId, asset.quantity);
+      await this.resetAssetQuantity(app, corporationId, asset.assetId, asset.quantity);
     }
   }
 }

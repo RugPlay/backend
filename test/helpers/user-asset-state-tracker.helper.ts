@@ -1,25 +1,25 @@
 import { INestApplication } from '@nestjs/common';
 import { AssetHoldingDao } from '../../src/modules/assets/daos/asset-holding.dao';
 
-export interface UserAssetState {
-  userId: string;
+export interface CorporationAssetState {
+  corporationId: string;
   startingAssets: Record<string, number>; // assetId -> quantity
   expectedAssets: Record<string, number>; // assetId -> quantity
   reservedAssets: Record<string, number>; // assetId -> quantity reserved for pending orders
 }
 
 export class UserAssetStateTracker {
-  private users: Map<string, UserAssetState> = new Map();
+  private corporations: Map<string, CorporationAssetState> = new Map();
 
   /**
-   * Register a user with starting asset state
+   * Register a corporation with starting asset state
    */
-  registerUser(
-    userId: string,
+  registerCorporation(
+    corporationId: string,
     startingAssets: Record<string, number> = {}
   ): void {
-    this.users.set(userId, {
-      userId,
+    this.corporations.set(corporationId, {
+      corporationId,
       startingAssets: { ...startingAssets },
       expectedAssets: { ...startingAssets },
       reservedAssets: {},
@@ -27,22 +27,22 @@ export class UserAssetStateTracker {
   }
 
   /**
-   * Register a user by reading their current state from the database
+   * Register a corporation by reading their current state from the database
    */
   async registerUserFromCurrentState(
     app: INestApplication,
-    userId: string
+    corporationId: string
   ): Promise<void> {
     const assetHoldingDao = app.get(AssetHoldingDao);
-    const currentAssets = await assetHoldingDao.getAssetsByUserId(userId);
+    const currentAssets = await assetHoldingDao.getAssetsByCorporationId(corporationId);
     
     const assetsMap: Record<string, number> = {};
     for (const asset of currentAssets) {
       assetsMap[asset.assetId] = parseFloat(asset.quantity.toString());
     }
 
-    this.users.set(userId, {
-      userId,
+    this.corporations.set(corporationId, {
+      corporationId,
       startingAssets: { ...assetsMap },
       expectedAssets: { ...assetsMap },
       reservedAssets: {},
@@ -50,8 +50,8 @@ export class UserAssetStateTracker {
   }
 
   /**
-   * Record a trade that affects user asset state
-   * @param userId - User ID
+   * Record a trade that affects corporation asset state
+   * @param corporationId - Corporation ID
    * @param baseAssetId - Base asset ID (the asset being traded)
    * @param quoteAssetId - Quote asset ID (the asset used for pricing)
    * @param side - "bid" (buy) or "ask" (sell)
@@ -60,7 +60,7 @@ export class UserAssetStateTracker {
    * @param wasReserved - Whether the assets were already reserved (default: false)
    */
   recordTrade(
-    userId: string,
+    corporationId: string,
     baseAssetId: string,
     quoteAssetId: string,
     side: 'bid' | 'ask',
@@ -68,9 +68,9 @@ export class UserAssetStateTracker {
     quantity: number,
     wasReserved: boolean = false
   ): void {
-    const state = this.users.get(userId);
+    const state = this.corporations.get(corporationId);
     if (!state) {
-      throw new Error(`User ${userId} not registered`);
+      throw new Error(`Corporation ${corporationId} not registered`);
     }
 
     if (side === 'bid') {
@@ -121,10 +121,10 @@ export class UserAssetStateTracker {
   /**
    * Reserve quote asset (for pending BID orders)
    */
-  reserveQuoteAsset(userId: string, assetId: string, amount: number): void {
-    const state = this.users.get(userId);
+  reserveQuoteAsset(corporationId: string, assetId: string, amount: number): void {
+    const state = this.corporations.get(corporationId);
     if (!state) {
-      throw new Error(`User ${userId} not registered`);
+      throw new Error(`Corporation ${corporationId} not registered`);
     }
     state.expectedAssets[assetId] = (state.expectedAssets[assetId] || 0) - amount;
     state.reservedAssets[assetId] = (state.reservedAssets[assetId] || 0) + amount;
@@ -133,10 +133,10 @@ export class UserAssetStateTracker {
   /**
    * Reserve base asset (for pending ASK orders)
    */
-  reserveBaseAsset(userId: string, assetId: string, quantity: number): void {
-    const state = this.users.get(userId);
+  reserveBaseAsset(corporationId: string, assetId: string, quantity: number): void {
+    const state = this.corporations.get(corporationId);
     if (!state) {
-      throw new Error(`User ${userId} not registered`);
+      throw new Error(`Corporation ${corporationId} not registered`);
     }
     state.reservedAssets[assetId] = (state.reservedAssets[assetId] || 0) + quantity;
     const startingAsset = state.startingAssets[assetId] || 0;
@@ -146,38 +146,38 @@ export class UserAssetStateTracker {
   /**
    * Release reserved asset (when order is filled or cancelled)
    */
-  releaseAsset(userId: string, assetId: string, amount: number): void {
-    const state = this.users.get(userId);
+  releaseAsset(corporationId: string, assetId: string, amount: number): void {
+    const state = this.corporations.get(corporationId);
     if (!state) {
-      throw new Error(`User ${userId} not registered`);
+      throw new Error(`Corporation ${corporationId} not registered`);
     }
     state.expectedAssets[assetId] = (state.expectedAssets[assetId] || 0) + amount;
     state.reservedAssets[assetId] = Math.max(0, (state.reservedAssets[assetId] || 0) - amount);
   }
 
   /**
-   * Get expected state for a user
+   * Get expected state for a corporation
    */
-  getExpectedState(userId: string): UserAssetState | undefined {
-    return this.users.get(userId);
+  getExpectedState(corporationId: string): CorporationAssetState | undefined {
+    return this.corporations.get(corporationId);
   }
 
   /**
-   * Verify user asset quantity matches expected
+   * Verify corporation asset quantity matches expected
    */
   async verifyAsset(
     app: INestApplication,
-    userId: string,
+    corporationId: string,
     assetId: string,
     tolerance: number = 0.0001
   ): Promise<{ success: boolean; expected: number; actual: number; difference: number }> {
-    const state = this.users.get(userId);
+    const state = this.corporations.get(corporationId);
     if (!state) {
-      throw new Error(`User ${userId} not registered`);
+      throw new Error(`Corporation ${corporationId} not registered`);
     }
 
     const assetHoldingDao = app.get(AssetHoldingDao);
-    const asset = await assetHoldingDao.getAsset(userId, assetId);
+    const asset = await assetHoldingDao.getAsset(corporationId, assetId);
     
     const expectedAvailableQuantity = state.expectedAssets[assetId] || 0;
     const reservedQuantity = state.reservedAssets[assetId] || 0;
@@ -197,29 +197,29 @@ export class UserAssetStateTracker {
   }
 
   /**
-   * Verify all assets for a user
+   * Verify all assets for a corporation
    */
   async verifyAllAssets(
     app: INestApplication,
-    userId: string,
+    corporationId: string,
     tolerance: number = 0.0001
   ): Promise<Map<string, { success: boolean; expected: number; actual: number; difference: number }>> {
-    const state = this.users.get(userId);
+    const state = this.corporations.get(corporationId);
     if (!state) {
-      throw new Error(`User ${userId} not registered`);
+      throw new Error(`Corporation ${corporationId} not registered`);
     }
 
     const results = new Map<string, { success: boolean; expected: number; actual: number; difference: number }>();
     
     // Check all expected assets
     for (const [assetId, expectedQuantity] of Object.entries(state.expectedAssets)) {
-      const result = await this.verifyAsset(app, userId, assetId, tolerance);
+      const result = await this.verifyAsset(app, corporationId, assetId, tolerance);
       results.set(assetId, result);
     }
 
     // Check for assets that exist but shouldn't
     const assetHoldingDao = app.get(AssetHoldingDao);
-    const allAssets = await assetHoldingDao.getAssetsByUserId(userId);
+    const allAssets = await assetHoldingDao.getAssetsByCorporationId(corporationId);
     
     for (const asset of allAssets) {
       const assetId = asset.assetId;
@@ -240,34 +240,34 @@ export class UserAssetStateTracker {
   }
 
   /**
-   * Verify complete user state (all assets)
+   * Verify complete corporation state (all assets)
    */
   async verifyUser(
     app: INestApplication,
-    userId: string,
+    corporationId: string,
     tolerance: number = 0.0001
   ): Promise<{
-    userId: string;
+    corporationId: string;
     assets: Map<string, { success: boolean; expected: number; actual: number; difference: number }>;
     allSuccess: boolean;
   }> {
-    const assets = await this.verifyAllAssets(app, userId, tolerance);
+    const assets = await this.verifyAllAssets(app, corporationId, tolerance);
     
     const allAssetsSuccess = Array.from(assets.values()).every(a => a.success);
     const allSuccess = allAssetsSuccess;
 
     return {
-      userId,
+      corporationId,
       assets,
       allSuccess,
     };
   }
 
   /**
-   * Reset tracker (clear all registered users)
+   * Reset tracker (clear all registered corporations)
    */
   reset(): void {
-    this.users.clear();
+    this.corporations.clear();
   }
 }
 

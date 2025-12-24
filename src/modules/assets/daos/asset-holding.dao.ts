@@ -6,16 +6,16 @@ import { sql } from "kysely";
 @Injectable()
 export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
   /**
-   * Get all assets (holdings) for a user
+   * Get all assets (holdings) for a corporation
    */
-  async getAssetsByUserId(userId: string): Promise<HoldingDto[]> {
+  async getAssetsByCorporationId(corporationId: string): Promise<HoldingDto[]> {
     try {
       const holdings = await this.kysely
         .selectFrom('holdings')
         .leftJoin('assets', 'holdings.asset_id', 'assets.id')
         .select([
           'holdings.id',
-          'holdings.user_id',
+          'holdings.corporation_id',
           'holdings.asset_id',
           'holdings.quantity',
           'holdings.average_cost_basis',
@@ -25,22 +25,22 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
           'assets.symbol as asset_symbol',
           'assets.name as asset_name',
         ] as any)
-        .where('holdings.user_id', '=', userId)
+        .where('holdings.corporation_id', '=', corporationId)
         .orderBy('holdings.created_at', 'desc')
         .execute();
 
       return (holdings || []).map((holding) => this.mapRecordToDto(holding));
     } catch (error) {
-      console.error("Error getting assets by user ID:", error);
+      console.error("Error getting assets by corporation ID:", error);
       return [];
     }
   }
 
   /**
-   * Get a specific asset holding by user ID and asset ID
+   * Get a specific asset holding by corporation ID and asset ID
    */
   async getAsset(
-    userId: string,
+    corporationId: string,
     assetId: string,
   ): Promise<HoldingDto | null> {
     try {
@@ -49,7 +49,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
         .leftJoin('assets', 'holdings.asset_id', 'assets.id')
         .select([
           'holdings.id',
-          'holdings.user_id',
+          'holdings.corporation_id',
           'holdings.asset_id',
           'holdings.quantity',
           'holdings.average_cost_basis',
@@ -59,7 +59,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
           'assets.symbol as asset_symbol',
           'assets.name as asset_name',
         ] as any)
-        .where('holdings.user_id', '=', userId)
+        .where('holdings.corporation_id', '=', corporationId)
         .where('holdings.asset_id', '=', assetId)
         .executeTakeFirst();
 
@@ -78,7 +78,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
    * Get or create an asset holding and return its ID
    */
   async getOrCreateAssetId(
-    userId: string,
+    corporationId: string,
     assetId: string,
     trx?: any,
   ): Promise<string | null> {
@@ -89,7 +89,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
       const existing = await db
         .selectFrom('holdings')
         .select('id')
-        .where('user_id', '=', userId)
+        .where('corporation_id', '=', corporationId)
         .where('asset_id', '=', assetId)
         .executeTakeFirst();
 
@@ -101,7 +101,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
       const result = await db
         .insertInto('holdings')
         .values({
-          user_id: userId,
+          corporation_id: corporationId,
           asset_id: assetId,
           quantity: '0',
           average_cost_basis: '0',
@@ -121,7 +121,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
    * Create or update an asset quantity
    */
   async upsertAsset(
-    userId: string,
+    corporationId: string,
     assetId: string,
     quantity: number,
   ): Promise<boolean> {
@@ -129,14 +129,14 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
       await this.kysely
         .insertInto('holdings')
         .values({
-          user_id: userId,
+          corporation_id: corporationId,
           asset_id: assetId,
           quantity: quantity.toString(),
           average_cost_basis: '0',
           total_cost: '0',
         } as any)
         .onConflict((oc) => 
-          oc.columns(['user_id', 'asset_id']).doUpdateSet({
+          oc.columns(['corporation_id', 'asset_id']).doUpdateSet({
             quantity: sql`holdings.quantity + EXCLUDED.quantity`,
             updated_at: sql`CURRENT_TIMESTAMP`,
           } as any)
@@ -154,7 +154,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
    * Set asset quantity to a specific value
    */
   async setAssetQuantity(
-    userId: string,
+    corporationId: string,
     assetId: string,
     quantity: number,
   ): Promise<boolean> {
@@ -162,14 +162,14 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
       await this.kysely
         .insertInto('holdings')
         .values({
-          user_id: userId,
+          corporation_id: corporationId,
           asset_id: assetId,
           quantity: quantity.toString(),
           average_cost_basis: '0',
           total_cost: '0',
         } as any)
         .onConflict((oc) => 
-          oc.columns(['user_id', 'asset_id']).doUpdateSet({
+          oc.columns(['corporation_id', 'asset_id']).doUpdateSet({
             quantity: quantity.toString(),
             updated_at: sql`CURRENT_TIMESTAMP`,
           } as any)
@@ -188,7 +188,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
    * Includes quantity check to prevent negative holdings
    */
   async adjustAssetQuantity(
-    userId: string,
+    corporationId: string,
     assetId: string,
     deltaQuantity: number,
     trx?: any,
@@ -204,7 +204,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
             quantity: sql`quantity + ${deltaQuantity.toString()}`,
             updated_at: sql`CURRENT_TIMESTAMP`,
           })
-          .where('user_id', '=', userId)
+          .where('corporation_id', '=', corporationId)
           .where('asset_id', '=', assetId)
           .where('quantity', '>=', Math.abs(deltaQuantity).toString()) // Prevent negative holdings
           .executeTakeFirst();
@@ -217,7 +217,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
             quantity: sql`quantity + ${deltaQuantity.toString()}`,
             updated_at: sql`CURRENT_TIMESTAMP`,
           })
-          .where('user_id', '=', userId)
+          .where('corporation_id', '=', corporationId)
           .where('asset_id', '=', assetId)
           .executeTakeFirst();
 
@@ -226,7 +226,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
           await db
             .insertInto('holdings')
             .values({
-              user_id: userId,
+              corporation_id: corporationId,
               asset_id: assetId,
               quantity: deltaQuantity.toString(),
               average_cost_basis: '0',
@@ -247,20 +247,20 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
    * Returns true if reservation successful, false if insufficient quantity
    */
   async reserveAsset(
-    userId: string,
+    corporationId: string,
     assetId: string,
     quantity: number,
   ): Promise<boolean> {
     try {
       // First, ensure the holding exists (create with 0 if it doesn't)
-      await this.getOrCreateAssetId(userId, assetId);
+      await this.getOrCreateAssetId(corporationId, assetId);
       
       // Get current quantity to check if we have enough
-      const currentHolding = await this.getAsset(userId, assetId);
+      const currentHolding = await this.getAsset(corporationId, assetId);
       const currentQuantity = currentHolding ? parseFloat(currentHolding.quantity.toString()) : 0;
       
       if (currentQuantity < quantity) {
-        console.error(`Failed to reserve asset: insufficient quantity. User: ${userId}, Asset: ${assetId}, Current: ${currentQuantity}, Required: ${quantity}`);
+        console.error(`Failed to reserve asset: insufficient quantity. Corporation: ${corporationId}, Asset: ${assetId}, Current: ${currentQuantity}, Required: ${quantity}`);
         return false;
       }
       
@@ -273,13 +273,13 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
           quantity: sql`quantity - ${quantityStr}::numeric`,
           updated_at: sql`CURRENT_TIMESTAMP`,
         })
-        .where('user_id', '=', userId)
+        .where('corporation_id', '=', corporationId)
         .where('asset_id', '=', assetId)
         .where((eb) => eb('quantity', '>=', quantityStr)) // String comparison should work for numeric strings
         .executeTakeFirst();
       if (Number(result.numUpdatedRows) === 0) {
         // No rows updated means insufficient holdings (race condition or precision issue)
-        console.error(`Failed to reserve asset: update failed. User: ${userId}, Asset: ${assetId}, Current: ${currentQuantity}, Required: ${quantity}`);
+        console.error(`Failed to reserve asset: update failed. Corporation: ${corporationId}, Asset: ${assetId}, Current: ${currentQuantity}, Required: ${quantity}`);
         return false;
       }
 
@@ -293,14 +293,14 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
   /**
    * Delete assets with zero or negative quantity
    */
-  async cleanupZeroAssets(userId?: string): Promise<number> {
+  async cleanupZeroAssets(corporationId?: string): Promise<number> {
     try {
       let query = this.kysely
         .deleteFrom('holdings')
         .where('quantity', '<=', '0');
 
-      if (userId) {
-        query = query.where('user_id', '=', userId);
+      if (corporationId) {
+        query = query.where('corporation_id', '=', corporationId);
       }
 
       const result = await query.executeTakeFirst();
@@ -312,18 +312,18 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
   }
 
   /**
-   * Delete all assets for a user
+   * Delete all assets for a corporation
    */
-  async deleteUserAssets(userId: string): Promise<boolean> {
+  async deleteCorporationAssets(corporationId: string): Promise<boolean> {
     try {
       await this.kysely
         .deleteFrom('holdings')
-        .where('user_id', '=', userId)
+        .where('corporation_id', '=', corporationId)
         .execute();
 
       return true;
     } catch (error) {
-      console.error("Error deleting user assets:", error);
+      console.error("Error deleting corporation assets:", error);
       return false;
     }
   }
@@ -334,7 +334,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
   private mapRecordToDto(record: any): HoldingDto {
     const dto = new HoldingDto();
     dto.id = record.id;
-    dto.userId = record.user_id;
+    dto.corporationId = record.corporation_id;
     dto.assetId = record.asset_id;
     dto.assetSymbol = record.asset_symbol;
     dto.assetName = record.asset_name;
@@ -351,7 +351,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
    * When buying: new_average = (old_total_cost + new_cost) / (old_quantity + new_quantity)
    */
   async updateCostBasisOnPurchase(
-    userId: string,
+    corporationId: string,
     assetId: string,
     purchaseQuantity: number,
     purchasePrice: number,
@@ -365,7 +365,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
       const current = await db
         .selectFrom('holdings')
         .select(['quantity', 'average_cost_basis', 'total_cost'])
-        .where('user_id', '=', userId)
+        .where('corporation_id', '=', corporationId)
         .where('asset_id', '=', assetId)
         .executeTakeFirst();
 
@@ -378,7 +378,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
             total_cost: purchaseCost.toString(),
             updated_at: sql`CURRENT_TIMESTAMP`,
           })
-          .where('user_id', '=', userId)
+          .where('corporation_id', '=', corporationId)
           .where('asset_id', '=', assetId)
           .executeTakeFirst();
         return Number(result.numUpdatedRows) > 0;
@@ -421,7 +421,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
           total_cost: newTotalCost.toString(),
           updated_at: sql`CURRENT_TIMESTAMP`,
         })
-        .where('user_id', '=', userId)
+        .where('corporation_id', '=', corporationId)
         .where('asset_id', '=', assetId)
         .executeTakeFirst();
 
@@ -437,7 +437,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
    * When selling, we don't change the average cost basis, just reduce total_cost proportionally
    */
   async updateCostBasisOnSale(
-    userId: string,
+    corporationId: string,
     assetId: string,
     saleQuantity: number,
     trx?: any,
@@ -449,7 +449,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
       const current = await db
         .selectFrom('holdings')
         .select(['quantity', 'average_cost_basis', 'total_cost'])
-        .where('user_id', '=', userId)
+        .where('corporation_id', '=', corporationId)
         .where('asset_id', '=', assetId)
         .executeTakeFirst();
 
@@ -481,7 +481,7 @@ export class AssetHoldingDao extends KyselyDao<AssetHoldingDao> {
           total_cost: Math.max(0, newTotalCost).toString(),
           updated_at: sql`CURRENT_TIMESTAMP`,
         })
-        .where('user_id', '=', userId)
+        .where('corporation_id', '=', corporationId)
         .where('asset_id', '=', assetId)
         .executeTakeFirst();
 

@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from "@nestjs/common";
 import { AssetHoldingDao } from "../daos/asset-holding.dao";
+import { CorporationDao } from "@/modules/corporations/daos/corporation.dao";
 import { HoldingDto } from "../dtos/holding.dto";
 import { CreateHoldingDto } from "../dtos/create-holding.dto";
 import { UpdateHoldingDto } from "../dtos/update-holding.dto";
@@ -10,50 +11,86 @@ export class HoldingService {
 
   constructor(
     private readonly assetHoldingDao: AssetHoldingDao,
+    private readonly corporationDao: CorporationDao,
   ) {}
 
   /**
-   * Get all holdings for a user
+   * Get all holdings for a corporation
    */
-  async getHoldingsByUserId(userId: string): Promise<HoldingDto[]> {
-    this.logger.log(`Getting holdings for user: ${userId}`);
-    return await this.assetHoldingDao.getAssetsByUserId(userId);
+  async getHoldingsByCorporationId(corporationId: string): Promise<HoldingDto[]> {
+    this.logger.log(`Getting holdings for corporation: ${corporationId}`);
+    
+    // Validate corporation exists
+    const corporation = await this.corporationDao.getCorporationById(corporationId);
+    if (!corporation) {
+      throw new NotFoundException(`Corporation with ID ${corporationId} not found`);
+    }
+    
+    return await this.assetHoldingDao.getAssetsByCorporationId(corporationId);
   }
 
   /**
-   * Get a specific holding by user ID and asset ID
+   * Get a specific holding by corporation ID and asset ID
    */
-  async getHolding(userId: string, assetId: string): Promise<HoldingDto | null> {
-    this.logger.log(`Getting holding for user: ${userId}, asset: ${assetId}`);
-    return await this.assetHoldingDao.getAsset(userId, assetId);
+  async getHolding(corporationId: string, assetId: string): Promise<HoldingDto | null> {
+    this.logger.log(`Getting holding for corporation: ${corporationId}, asset: ${assetId}`);
+    
+    // Validate corporation exists
+    const corporation = await this.corporationDao.getCorporationById(corporationId);
+    if (!corporation) {
+      throw new NotFoundException(`Corporation with ID ${corporationId} not found`);
+    }
+    
+    return await this.assetHoldingDao.getAsset(corporationId, assetId);
   }
 
   /**
    * Create or update a holding
    */
-  async upsertHolding(userId: string, assetId: string, quantity: number): Promise<boolean> {
-    this.logger.log(`Upserting holding for user: ${userId}, asset: ${assetId}, quantity: ${quantity}`);
-    return await this.assetHoldingDao.upsertAsset(userId, assetId, quantity);
+  async upsertHolding(corporationId: string, assetId: string, quantity: number): Promise<boolean> {
+    this.logger.log(`Upserting holding for corporation: ${corporationId}, asset: ${assetId}, quantity: ${quantity}`);
+    
+    // Validate corporation exists
+    const corporation = await this.corporationDao.getCorporationById(corporationId);
+    if (!corporation) {
+      throw new NotFoundException(`Corporation with ID ${corporationId} not found`);
+    }
+    
+    return await this.assetHoldingDao.upsertAsset(corporationId, assetId, quantity);
   }
 
   /**
    * Set holding quantity to a specific value
    */
-  async setHoldingQuantity(userId: string, assetId: string, quantity: number): Promise<boolean> {
-    this.logger.log(`Setting holding quantity for user: ${userId}, asset: ${assetId}, quantity: ${quantity}`);
-    return await this.assetHoldingDao.setAssetQuantity(userId, assetId, quantity);
+  async setHoldingQuantity(corporationId: string, assetId: string, quantity: number): Promise<boolean> {
+    this.logger.log(`Setting holding quantity for corporation: ${corporationId}, asset: ${assetId}, quantity: ${quantity}`);
+    
+    // Validate corporation exists
+    const corporation = await this.corporationDao.getCorporationById(corporationId);
+    if (!corporation) {
+      throw new NotFoundException(`Corporation with ID ${corporationId} not found`);
+    }
+    
+    return await this.assetHoldingDao.setAssetQuantity(corporationId, assetId, quantity);
   }
 
   /**
    * Adjust holding quantity by a delta amount
    */
   async adjustHoldingQuantity(
-    userId: string,
+    corporationId: string,
     assetId: string,
     deltaQuantity: number,
   ): Promise<boolean> {
-    this.logger.log(`Adjusting holding quantity for user: ${userId}, asset: ${assetId}, delta: ${deltaQuantity}`);
-    return await this.assetHoldingDao.adjustAssetQuantity(userId, assetId, deltaQuantity);
+    this.logger.log(`Adjusting holding quantity for corporation: ${corporationId}, asset: ${assetId}, delta: ${deltaQuantity}`);
+    
+    // Validate corporation exists
+    const corporation = await this.corporationDao.getCorporationById(corporationId);
+    if (!corporation) {
+      throw new NotFoundException(`Corporation with ID ${corporationId} not found`);
+    }
+    
+    return await this.assetHoldingDao.adjustAssetQuantity(corporationId, assetId, deltaQuantity);
   }
 }
 

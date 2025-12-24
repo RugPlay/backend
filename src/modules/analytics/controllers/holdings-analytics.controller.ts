@@ -34,10 +34,10 @@ export class HoldingsAnalyticsController {
     example: TimeBucketInterval.ONE_HOUR,
   })
   @ApiQuery({
-    name: "userId",
+    name: "corporationId",
     required: false,
-    description: "Filter by specific user ID",
-    example: "user_123e4567-e89b-12d3-a456-426614174000",
+    description: "Filter by specific corporation ID",
+    example: "123e4567-e89b-12d3-a456-426614174000",
   })
   @ApiQuery({
     name: "assetId",
@@ -75,7 +75,7 @@ export class HoldingsAnalyticsController {
   })
   async getHoldingsProductionData(
     @Query("interval", new ParseEnumPipe(TimeBucketInterval)) interval: TimeBucketInterval,
-    @Query("userId") userId?: string,
+    @Query("corporationId") corporationId?: string,
     @Query("assetId") assetId?: string,
     @Query("startTime") startTime?: string,
     @Query("endTime") endTime?: string,
@@ -84,7 +84,7 @@ export class HoldingsAnalyticsController {
     try {
       const query: HoldingsProductionQueryDto = {
         interval,
-        userId,
+        corporationId,
         assetId,
         startTime: startTime ? new Date(startTime) : undefined,
         endTime: endTime ? new Date(endTime) : undefined,
@@ -112,10 +112,10 @@ export class HoldingsAnalyticsController {
     example: TimeBucketInterval.ONE_HOUR,
   })
   @ApiQuery({
-    name: "userId",
+    name: "corporationId",
     required: false,
-    description: "Filter by specific user ID",
-    example: "user_123e4567-e89b-12d3-a456-426614174000",
+    description: "Filter by specific corporation ID",
+    example: "123e4567-e89b-12d3-a456-426614174000",
   })
   @ApiQuery({
     name: "assetId",
@@ -153,7 +153,7 @@ export class HoldingsAnalyticsController {
   })
   async getHoldingsGrowthData(
     @Query("interval", new ParseEnumPipe(TimeBucketInterval)) interval: TimeBucketInterval,
-    @Query("userId") userId?: string,
+    @Query("corporationId") corporationId?: string,
     @Query("assetId") assetId?: string,
     @Query("startTime") startTime?: string,
     @Query("endTime") endTime?: string,
@@ -162,7 +162,7 @@ export class HoldingsAnalyticsController {
     try {
       return await this.holdingsAnalyticsService.getHoldingsGrowthData(
         interval,
-        userId,
+        corporationId,
         assetId,
         startTime ? new Date(startTime) : undefined,
         endTime ? new Date(endTime) : undefined,
@@ -182,10 +182,10 @@ export class HoldingsAnalyticsController {
     description: "Returns the total number of holdings at a specific point in time",
   })
   @ApiQuery({
-    name: "userId",
+    name: "corporationId",
     required: false,
-    description: "Filter by specific user ID",
-    example: "user_123e4567-e89b-12d3-a456-426614174000",
+    description: "Filter by specific corporation ID",
+    example: "123e4567-e89b-12d3-a456-426614174000",
   })
   @ApiQuery({
     name: "assetId",
@@ -208,13 +208,13 @@ export class HoldingsAnalyticsController {
     },
   })
   async getTotalHoldingsCount(
-    @Query("userId") userId?: string,
+    @Query("corporationId") corporationId?: string,
     @Query("assetId") assetId?: string,
     @Query("atTime") atTime?: string,
   ): Promise<number> {
     try {
       return await this.holdingsAnalyticsService.getTotalHoldingsCount(
-        userId,
+        corporationId,
         assetId,
         atTime ? new Date(atTime) : undefined,
       );

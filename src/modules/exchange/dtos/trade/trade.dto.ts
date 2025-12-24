@@ -71,16 +71,16 @@ export class TradeDto {
   makerHoldingId?: string;
 
   @ApiPropertyOptional({
-    description: "The user ID of the taker (for filtering)",
-    example: "user_123e4567-e89b-12d3-a456-426614174000",
+    description: "The corporation ID of the taker (for filtering)",
+    example: "123e4567-e89b-12d3-a456-426614174000",
   })
-  takerUserId?: string;
+  takerCorporationId?: string;
 
   @ApiPropertyOptional({
-    description: "The user ID of the maker (for filtering)",
-    example: "user_456e7890-e89b-12d3-a456-426614174001",
+    description: "The corporation ID of the maker (for filtering)",
+    example: "456e7890-e89b-12d3-a456-426614174001",
   })
-  makerUserId?: string;
+  makerCorporationId?: string;
 
 
   @ApiProperty({
