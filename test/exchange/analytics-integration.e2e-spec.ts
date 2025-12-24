@@ -1,18 +1,18 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { INestApplication } from "@nestjs/common";
 import request from "supertest";
-import { AppModule } from "../src/app.module";
+import { AppModule } from "../../src/app.module";
 import { v4 as uuidv4 } from "uuid";
-import { TestCleanupHelper } from "./helpers/test-cleanup.helper";
-import { OrderService } from "../src/modules/exchange/services/order.service";
-import { MarketService } from "../src/modules/exchange/services/market.service";
-import { AssetService } from "../src/modules/assets/services/asset.service";
-import { HoldingService } from "../src/modules/assets/services/holding.service";
-import { TimeBucketInterval } from "../src/modules/analytics/dtos/shared/time-bucket.dto";
-import { OrderBookEntryDto } from "../src/modules/exchange/dtos/order/order-book-entry.dto";
-import { AssetHoldingDao } from "../src/modules/assets/daos/asset-holding.dao";
+import { TestCleanupHelper } from "../helpers/test-cleanup.helper";
+import { OrderService } from "../../src/modules/exchange/services/order.service";
+import { MarketService } from "../../src/modules/exchange/services/market.service";
+import { AssetService } from "../../src/modules/assets/services/asset.service";
+import { HoldingService } from "../../src/modules/assets/services/holding.service";
+import { TimeBucketInterval } from "../../src/modules/analytics/dtos/shared/time-bucket.dto";
+import { OrderBookEntryDto } from "../../src/modules/exchange/dtos/order/order-book-entry.dto";
+import { AssetHoldingDao } from "../../src/modules/assets/daos/asset-holding.dao";
 import { Kysely, sql } from "kysely";
-import { DB } from "../src/database/types/db";
+import { DB } from "../../src/database/types/db";
 
 describe("Analytics Integration (e2e)", () => {
   let app: INestApplication;

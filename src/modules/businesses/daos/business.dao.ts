@@ -1,14 +1,27 @@
 import { Injectable } from "@nestjs/common";
 import { KyselyDao } from "@/database/kysely/kysely.dao";
+import { InjectKysely } from "nestjs-kysely";
+import { Kysely } from "kysely";
+import { DB } from "@/database/types/db";
 import { CreateBusinessDto } from "../dtos/create-business.dto";
 import { UpdateBusinessDto } from "../dtos/update-business.dto";
 import { BusinessFiltersDto } from "../dtos/business-filters.dto";
 import { BusinessDto } from "../dtos/business.dto";
+import { BusinessInputDao } from "./business-input.dao";
+import { BusinessOutputDao } from "./business-output.dao";
 
 @Injectable()
 export class BusinessDao extends KyselyDao<BusinessDao> {
+  constructor(
+    @InjectKysely() kysely: Kysely<DB>,
+    private readonly businessInputDao: BusinessInputDao,
+    private readonly businessOutputDao: BusinessOutputDao
+  ) {
+    super(kysely);
+  }
   /**
    * Insert a new business into the database
+   * Note: Inputs and outputs should be created separately using BusinessInputDao and BusinessOutputDao
    */
   async createBusiness(business: CreateBusinessDto): Promise<string | null> {
     try {
@@ -41,7 +54,18 @@ export class BusinessDao extends KyselyDao<BusinessDao> {
         .selectAll()
         .where("id", "=", id)
         .executeTakeFirst();
-      return result ? this.mapRecordToDto(result) : null;
+      
+      if (!result) {
+        return null;
+      }
+
+      const business = this.mapRecordToDto(result);
+      
+      // Load inputs and outputs
+      business.inputs = await this.businessInputDao.getInputsByBusinessId(id);
+      business.outputs = await this.businessOutputDao.getOutputsByBusinessId(id);
+      
+      return business;
     } catch (error) {
       console.error("Error fetching business by ID:", error);
       return null;
@@ -89,7 +113,15 @@ export class BusinessDao extends KyselyDao<BusinessDao> {
       }
 
       const results = await query.orderBy("name", "asc").execute();
-      return results.map((record) => this.mapRecordToDto(record));
+      const businesses = results.map((record) => this.mapRecordToDto(record));
+      
+      // Load inputs and outputs for each business
+      for (const business of businesses) {
+        business.inputs = await this.businessInputDao.getInputsByBusinessId(business.id);
+        business.outputs = await this.businessOutputDao.getOutputsByBusinessId(business.id);
+      }
+      
+      return businesses;
     } catch (error) {
       console.error("Error fetching businesses:", error);
       return [];

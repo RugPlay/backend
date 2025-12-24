@@ -50,7 +50,7 @@ export class AnalyticsDao extends KyselyDao<AnalyticsDao> {
 
       const results = await query.execute(this.kysely);
 
-      return (results as any[]).map((row: any) => ({
+      return ((results as unknown) as any[]).map((row: any) => ({
         timestamp: row.timestamp as Date,
         open: parseFloat(row.open),
         high: parseFloat(row.high),
@@ -103,7 +103,7 @@ export class AnalyticsDao extends KyselyDao<AnalyticsDao> {
 
       const results = await query.execute(this.kysely);
 
-      return (results as any[]).map((row: any) => ({
+      return ((results as unknown) as any[]).map((row: any) => ({
         timestamp: row.timestamp as Date,
         volume: parseFloat(row.volume),
         tradeCount: parseInt(row.trade_count, 10),
@@ -223,11 +223,11 @@ export class AnalyticsDao extends KyselyDao<AnalyticsDao> {
 
       const results = await query.execute(this.kysely);
 
-      if (!results || (results as any[]).length === 0) {
+      if (!results || ((results as unknown) as any[]).length === 0) {
         return null;
       }
 
-      const row = (results as any[])[0];
+      const row = ((results as unknown) as any[])[0];
       const open = parseFloat(row.open);
       const close = parseFloat(row.close);
       const change = close - open;

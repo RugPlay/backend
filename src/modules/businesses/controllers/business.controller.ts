@@ -22,6 +22,10 @@ import { CreateBusinessDto } from "../dtos/create-business.dto";
 import { UpdateBusinessDto } from "../dtos/update-business.dto";
 import { BusinessFiltersDto } from "../dtos/business-filters.dto";
 import { BusinessDto } from "../dtos/business.dto";
+import { AddProductionTimeDto } from "../dtos/add-production-time.dto";
+import { ClaimOutputDto } from "../dtos/claim-output.dto";
+import { ClaimOutputResultDto } from "../dtos/claim-output-result.dto";
+import { BusinessProductionProgressDto } from "../dtos/business-production-progress.dto";
 
 @ApiTags("Businesses")
 @Controller("businesses")
@@ -82,6 +86,150 @@ export class BusinessController {
   @ApiResponse({ status: 404, description: "Business not found" })
   async getBusinessById(@Param("id") id: string): Promise<BusinessDto> {
     return this.businessService.getBusinessById(id);
+  }
+
+  @Get(":id/instance")
+  @ApiOperation({
+    summary: "Get a business instance",
+    description:
+      "Returns a business instance with type-specific configuration and behavior",
+  })
+  @ApiParam({ name: "id", description: "Business ID" })
+  @ApiResponse({
+    status: 200,
+    description: "Business instance found",
+    schema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+        type: { type: "string" },
+        businessData: { $ref: "#/components/schemas/BusinessDto" },
+        config: {
+          type: "object",
+          properties: {
+            baseProductionRate: { type: "number" },
+            defaultProductionTime: { type: "number" },
+            displayName: { type: "string" },
+            description: { type: "string" },
+            category: { type: "string" },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 404, description: "Business not found" })
+  async getBusinessInstance(@Param("id") id: string): Promise<{
+    id: string;
+    name: string;
+    type: string;
+    businessData: BusinessDto;
+    config: any;
+  }> {
+    const businessInstance =
+      await this.businessService.getBusinessInstance(id);
+    return {
+      id: businessInstance.getId(),
+      name: businessInstance.getName(),
+      type: businessInstance.getType(),
+      businessData: businessInstance.getBusinessData(),
+      config: businessInstance.getConfig(),
+    };
+  }
+
+  @Get("types/supported")
+  @ApiOperation({
+    summary: "Get all supported business types",
+    description: "Returns a list of all supported business types",
+  })
+  @ApiResponse({
+    status: 200,
+    description: "List of supported business types",
+    schema: {
+      type: "array",
+      items: {
+        type: "string",
+        enum: [
+          "agriculture",
+          "mining",
+          "industry_manufacturing",
+          "industry_technology",
+          "industry_healthcare",
+          "heavy_industry",
+          "power",
+          "logistics",
+          "commerce",
+        ],
+      },
+    },
+  })
+  async getSupportedBusinessTypes(): Promise<string[]> {
+    return this.businessService.getSupportedBusinessTypes();
+  }
+
+  @Post(":id/production/time")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Add production time to a business",
+    description:
+      "Adds time to a business's production accumulator. This time is used to calculate available outputs.",
+  })
+  @ApiParam({ name: "id", description: "Business ID" })
+  @ApiResponse({
+    status: 200,
+    description: "Production time added successfully",
+    type: BusinessProductionProgressDto,
+  })
+  @ApiResponse({ status: 404, description: "Business not found" })
+  async addProductionTime(
+    @Param("id") id: string,
+    @Body() addTimeDto: AddProductionTimeDto
+  ): Promise<BusinessProductionProgressDto> {
+    return this.businessService.addProductionTime(id, addTimeDto);
+  }
+
+  @Get(":id/production/progress")
+  @ApiOperation({
+    summary: "Get production progress for a business",
+    description:
+      "Returns the current production progress including accumulated time and available outputs",
+  })
+  @ApiParam({ name: "id", description: "Business ID" })
+  @ApiResponse({
+    status: 200,
+    description: "Production progress retrieved successfully",
+    type: BusinessProductionProgressDto,
+  })
+  @ApiResponse({ status: 404, description: "Business not found" })
+  async getProductionProgress(
+    @Param("id") id: string
+  ): Promise<BusinessProductionProgressDto> {
+    return this.businessService.getProductionProgress(id);
+  }
+
+  @Post(":id/production/claim")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Claim business outputs",
+    description:
+      "Claims available outputs from a business. Consumes required inputs and adds outputs to corporation holdings.",
+  })
+  @ApiParam({ name: "id", description: "Business ID" })
+  @ApiResponse({
+    status: 200,
+    description: "Outputs claimed successfully",
+    type: ClaimOutputResultDto,
+  })
+  @ApiResponse({ status: 404, description: "Business or output not found" })
+  @ApiResponse({
+    status: 400,
+    description: "Cannot claim: insufficient inputs or cycles",
+  })
+  async claimOutput(
+    @Param("id") id: string,
+    @Body() claimDto: ClaimOutputDto
+  ): Promise<ClaimOutputResultDto> {
+    return this.businessService.claimOutput(id, claimDto);
   }
 
   @Put(":id")

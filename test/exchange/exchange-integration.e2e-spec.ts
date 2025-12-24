@@ -1,16 +1,16 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { INestApplication } from "@nestjs/common";
 import request from "supertest";
-import { AppModule } from "../src/app.module";
+import { AppModule } from "../../src/app.module";
 import { v4 as uuidv4 } from "uuid";
-import { TestDataHelper } from "./helpers/test-data.helper";
-import { TestCleanupHelper } from "./helpers/test-cleanup.helper";
-import { UserAssetStateTracker } from "./helpers/user-asset-state-tracker.helper";
-import { AssetService } from "../src/modules/assets/services/asset.service";
-import { AssetHoldingDao } from "../src/modules/assets/daos/asset-holding.dao";
-import { OrderService } from "../src/modules/exchange/services/order.service";
-import { MarketService } from "../src/modules/exchange/services/market.service";
-import { TradeDao } from "../src/modules/exchange/daos/trade.dao";
+import { TestDataHelper } from "../helpers/test-data.helper";
+import { TestCleanupHelper } from "../helpers/test-cleanup.helper";
+import { UserAssetStateTracker } from "../helpers/user-asset-state-tracker.helper";
+import { AssetService } from "../../src/modules/assets/services/asset.service";
+import { AssetHoldingDao } from "../../src/modules/assets/daos/asset-holding.dao";
+import { OrderService } from "../../src/modules/exchange/services/order.service";
+import { MarketService } from "../../src/modules/exchange/services/market.service";
+import { TradeDao } from "../../src/modules/exchange/daos/trade.dao";
 
 describe("Exchange Integration (e2e)", () => {
   let app: INestApplication;
@@ -347,12 +347,15 @@ describe("Exchange Integration (e2e)", () => {
       quoteAssetId: usdAssetId,
     });
 
-    const marketResponse = await request(app.getHttpServer())
-      .post("/markets")
-      .send(marketData)
-      .expect(201);
-
-    testMarketId = marketResponse.body.id;
+    const marketService = moduleFixture.get<MarketService>(MarketService);
+    const orderService = moduleFixture.get<OrderService>(OrderService);
+    const market = await marketService.createMarket(marketData);
+    if (market) {
+      await orderService.initializeOrderBook(market.id);
+      testMarketId = market.id;
+    } else {
+      throw new Error("Failed to create test market");
+    }
   }
 
   describe("Order Book Management", () => {

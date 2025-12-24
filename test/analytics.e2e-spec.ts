@@ -10,9 +10,6 @@ import { AssetService } from "../src/modules/assets/services/asset.service";
 import { HoldingService } from "../src/modules/assets/services/holding.service";
 import { TimeBucketInterval } from "../src/modules/analytics/dtos/shared/time-bucket.dto";
 import { OrderBookEntryDto } from "../src/modules/exchange/dtos/order/order-book-entry.dto";
-import { AssetHoldingDao } from "../src/modules/assets/daos/asset-holding.dao";
-import { Kysely, sql } from "kysely";
-import { DB } from "../src/database/types/db";
 
 describe("Analytics (e2e)", () => {
   let app: INestApplication;
@@ -43,108 +40,10 @@ describe("Analytics (e2e)", () => {
     assetService = moduleFixture.get<AssetService>(AssetService);
     holdingService = moduleFixture.get<HoldingService>(HoldingService);
 
-    // Ensure TimescaleDB is enabled and hypertables are created
-    await ensureTimescaleDBSetup();
-
     await setupTestData();
     await createTestTrades();
     await createTestHoldings();
   });
-
-  async function ensureTimescaleDBSetup() {
-    const assetHoldingDao = app.get(AssetHoldingDao);
-    const kysely = (assetHoldingDao as any).kysely as Kysely<DB>;
-
-    try {
-      // Enable TimescaleDB extension if not already enabled
-      await sql`CREATE EXTENSION IF NOT EXISTS timescaledb`.execute(kysely);
-
-      // Check if hypertables already exist, if not create them
-      // Note: We use migrate_to_hypertable for existing tables to handle unique constraints
-      const tradesCheck = await sql`
-        SELECT COUNT(*) as count
-        FROM timescaledb_information.hypertables
-        WHERE hypertable_name = 'trades'
-      `.execute(kysely);
-      
-      const tradesRows = Array.isArray(tradesCheck) ? tradesCheck : (tradesCheck as any)?.rows || [];
-      const tradesCount = tradesRows[0]?.count || 0;
-      
-      if (parseInt(tradesCount) === 0) {
-        try {
-          // Try to convert existing table to hypertable
-          await sql`
-            SELECT create_hypertable(
-              'trades',
-              'created_at',
-              chunk_time_interval => INTERVAL '1 day',
-              if_not_exists => TRUE
-            )
-          `.execute(kysely);
-        } catch (hypertableError: any) {
-          // If it fails due to unique constraints, that's okay - table might already be set up
-          if (!hypertableError?.message?.includes('unique index')) {
-            console.warn("Could not create trades hypertable:", hypertableError?.message);
-          }
-        }
-      }
-
-      const ordersCheck = await sql`
-        SELECT COUNT(*) as count
-        FROM timescaledb_information.hypertables
-        WHERE hypertable_name = 'orders'
-      `.execute(kysely);
-      
-      const ordersRows = Array.isArray(ordersCheck) ? ordersCheck : (ordersCheck as any)?.rows || [];
-      const ordersCount = ordersRows[0]?.count || 0;
-      
-      if (parseInt(ordersCount) === 0) {
-        try {
-          await sql`
-            SELECT create_hypertable(
-              'orders',
-              'created_at',
-              chunk_time_interval => INTERVAL '1 day',
-              if_not_exists => TRUE
-            )
-          `.execute(kysely);
-        } catch (hypertableError: any) {
-          if (!hypertableError?.message?.includes('unique index')) {
-            console.warn("Could not create orders hypertable:", hypertableError?.message);
-          }
-        }
-      }
-
-      const holdingsCheck = await sql`
-        SELECT COUNT(*) as count
-        FROM timescaledb_information.hypertables
-        WHERE hypertable_name = 'holdings'
-      `.execute(kysely);
-      
-      const holdingsRows = Array.isArray(holdingsCheck) ? holdingsCheck : (holdingsCheck as any)?.rows || [];
-      const holdingsCount = holdingsRows[0]?.count || 0;
-      
-      if (parseInt(holdingsCount) === 0) {
-        try {
-          await sql`
-            SELECT create_hypertable(
-              'holdings',
-              'created_at',
-              chunk_time_interval => INTERVAL '1 day',
-              if_not_exists => TRUE
-            )
-          `.execute(kysely);
-        } catch (hypertableError: any) {
-          if (!hypertableError?.message?.includes('unique index')) {
-            console.warn("Could not create holdings hypertable:", hypertableError?.message);
-          }
-        }
-      }
-    } catch (error) {
-      console.error("Error setting up TimescaleDB:", error);
-      // Don't throw - tests might still work if hypertables already exist
-    }
-  }
 
   afterAll(async () => {
     await TestCleanupHelper.cleanupTestData(app);

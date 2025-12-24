@@ -1,5 +1,6 @@
 import { ApiProperty } from "@nestjs/swagger";
-import { IsString, IsOptional, IsBoolean, IsUUID } from "class-validator";
+import { IsString, IsOptional, IsBoolean, IsUUID, IsIn } from "class-validator";
+import { BusinessType } from "../types/business-type";
 
 export class UpdateBusinessDto {
   @ApiProperty({
@@ -21,13 +22,25 @@ export class UpdateBusinessDto {
   description?: string;
 
   @ApiProperty({
-    description: "Business category",
-    example: "technology",
+    description: "Business category/type",
+    example: "agriculture",
     required: false,
+    enum: ["agriculture", "mining"],
   })
   @IsString()
   @IsOptional()
-  category?: string;
+  @IsIn([
+    "agriculture",
+    "mining",
+    "industry_manufacturing",
+    "industry_technology",
+    "industry_healthcare",
+    "heavy_industry",
+    "power",
+    "logistics",
+    "commerce",
+  ])
+  category?: BusinessType;
 
   @ApiProperty({
     description: "The ID of the corporation that owns this business",

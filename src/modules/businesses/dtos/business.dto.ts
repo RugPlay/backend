@@ -1,4 +1,7 @@
 import { ApiProperty } from "@nestjs/swagger";
+import { BusinessType } from "../types/business-type";
+import { BusinessInputDto } from "./business-input.dto";
+import { BusinessOutputDto } from "./business-output.dto";
 
 export class BusinessDto {
   @ApiProperty({
@@ -21,10 +24,21 @@ export class BusinessDto {
   description?: string;
 
   @ApiProperty({
-    description: "Business category",
-    example: "technology",
+    description: "Business category/type",
+    example: "agriculture",
+    enum: [
+      "agriculture",
+      "mining",
+      "industry_manufacturing",
+      "industry_technology",
+      "industry_healthcare",
+      "heavy_industry",
+      "power",
+      "logistics",
+      "commerce",
+    ],
   })
-  category: string;
+  category: BusinessType;
 
   @ApiProperty({
     description: "The ID of the corporation that owns this business",
@@ -37,6 +51,20 @@ export class BusinessDto {
     example: true,
   })
   isActive: boolean;
+
+  @ApiProperty({
+    description: "List of input requirements for this business",
+    type: [BusinessInputDto],
+    required: false,
+  })
+  inputs?: BusinessInputDto[];
+
+  @ApiProperty({
+    description: "List of outputs produced by this business",
+    type: [BusinessOutputDto],
+    required: false,
+  })
+  outputs?: BusinessOutputDto[];
 
   @ApiProperty({
     description: "The timestamp when the business was created",

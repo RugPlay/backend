@@ -119,7 +119,7 @@ export class OrderService implements OnModuleInit {
         throw new HttpException(
           {
             statusCode: 400,
-            message: "User ID is required",
+            message: "Corporation ID is required",
             error: "Bad Request",
           },
           400,
@@ -1169,7 +1169,7 @@ export class OrderService implements OnModuleInit {
    * - Match quantity is the minimum of the remaining quantities
    * - Orders are matched in price-time priority (best price first, then earliest time)
    * 
-   * @returns Array of matches, each containing the matched order ID, user ID, price, and quantity
+   * @returns Array of matches, each containing the matched order ID, corporation ID, price, and quantity
    */
   private calculateMatches(
     incomingOrder: Omit<OrderBookEntryDto, "timestamp">,

@@ -18,7 +18,6 @@ import {
   ApiQuery,
 } from "@nestjs/swagger";
 import { AssetService } from "../services/asset.service";
-import { CreateAssetDto } from "../dtos/create-asset.dto";
 import { UpdateAssetDto } from "../dtos/update-asset.dto";
 import { AssetFiltersDto } from "../dtos/asset-filters.dto";
 import { AssetDto } from "../dtos/asset.dto";
@@ -27,19 +26,6 @@ import { AssetDto } from "../dtos/asset.dto";
 @Controller("assets")
 export class AssetController {
   constructor(private readonly assetService: AssetService) {}
-
-  @Post()
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: "Create a new asset" })
-  @ApiResponse({
-    status: 201,
-    description: "Asset created successfully",
-    type: AssetDto,
-  })
-  @ApiResponse({ status: 400, description: "Bad request" })
-  async createAsset(@Body() createDto: CreateAssetDto): Promise<AssetDto> {
-    return this.assetService.createAsset(createDto);
-  }
 
   @Get()
   @ApiOperation({ summary: "Get all assets with optional filters" })

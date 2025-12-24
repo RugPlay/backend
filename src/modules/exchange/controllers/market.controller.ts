@@ -21,7 +21,6 @@ import {
 import { MarketService } from "../services/market.service";
 import type { MarketCategory } from "../types/market-category";
 import { MarketDto } from "../dtos/market/market.dto";
-import { CreateMarketDto } from "../dtos/market/create-market.dto";
 import { UpdateMarketDto } from "../dtos/market/update-market.dto";
 import { MarketFiltersDto } from "../dtos/market/market-filters.dto";
 import { TradeExecutionDto } from "../dtos/trade/trade-execution.dto";
@@ -39,31 +38,6 @@ export class MarketController {
     private readonly marketService: MarketService,
     private readonly orderService: OrderService,
   ) {}
-
-  @Post()
-  @ApiOperation({ summary: "Create a new market" })
-  @ApiResponse({
-    status: 201,
-    description: "Market created successfully",
-    type: MarketDto,
-  })
-  @ApiResponse({
-    status: 400,
-    description: "Invalid market data or symbol already exists",
-  })
-  async createMarket(
-    @Body() createMarketDto: CreateMarketDto,
-  ): Promise<MarketDto> {
-    const market = await this.marketService.createMarket(createMarketDto);
-    if (!market) {
-      throw new MarketOperationFailedException("create");
-    }
-    
-    // Initialize order book for the new market
-    await this.orderService.initializeOrderBook(market.id);
-    
-    return market;
-  }
 
   @Get()
   @ApiOperation({ summary: "Get all markets with optional filters" })

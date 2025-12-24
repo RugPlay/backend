@@ -1,5 +1,6 @@
 import { ApiProperty } from "@nestjs/swagger";
-import { IsString, IsOptional, IsBoolean, IsUUID } from "class-validator";
+import { IsString, IsOptional, IsBoolean, IsUUID, IsIn } from "class-validator";
+import { BusinessType } from "../types/business-type";
 
 export class BusinessFiltersDto {
   @ApiProperty({
@@ -12,13 +13,15 @@ export class BusinessFiltersDto {
   name?: string;
 
   @ApiProperty({
-    description: "Filter by business category",
-    example: "technology",
+    description: "Filter by business category/type",
+    example: "agriculture",
     required: false,
+    enum: ["agriculture", "mining"],
   })
   @IsString()
   @IsOptional()
-  category?: string;
+  @IsIn(["agriculture", "mining"])
+  category?: BusinessType;
 
   @ApiProperty({
     description: "Filter by corporation ID",

@@ -5,9 +5,15 @@ import { AppModule } from "../src/app.module";
 import { v4 as uuidv4 } from "uuid";
 import { TestDataHelper } from "./helpers/test-data.helper";
 import { TestCleanupHelper } from "./helpers/test-cleanup.helper";
+import { AssetService } from "../src/modules/assets/services/asset.service";
+import { MarketService } from "../src/modules/exchange/services/market.service";
+import { OrderService } from "../src/modules/exchange/services/order.service";
+import type { MarketCategory } from "../src/modules/exchange/types/market-category";
+import { CreateMarketDto } from "../src/modules/exchange/dtos/market/create-market.dto";
 
 describe("Exchange (e2e)", () => {
   let app: INestApplication;
+  let moduleFixture: TestingModule;
   let testMarketId: string;
   let testCorporationId1: string;
   let testCorporationId2: string;
@@ -15,7 +21,7 @@ describe("Exchange (e2e)", () => {
   let btcAssetId: string;
 
   beforeAll(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
+    moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
@@ -51,10 +57,10 @@ describe("Exchange (e2e)", () => {
     await TestCleanupHelper.createTestAssetHolding(app, testCorporationId2, usdAssetId, 1000000);
 
     // Create a test market
-    const marketData = {
+    const marketData: CreateMarketDto = {
       name: "Test Bitcoin Market",
       symbol: "BTC/USD",
-      category: "crypto",
+      category: "crypto" as MarketCategory,
       baseAsset: "BTC",
       quoteAsset: "USD",
       baseAssetId: btcAssetId,
@@ -67,35 +73,36 @@ describe("Exchange (e2e)", () => {
       timezone: "UTC",
     };
 
-    const marketResponse = await request(app.getHttpServer())
-      .post("/markets")
-      .send(marketData)
-      .expect(201);
-
-    testMarketId = marketResponse.body.id;
+    const marketService = moduleFixture.get<MarketService>(MarketService);
+    const orderService = moduleFixture.get<OrderService>(OrderService);
+    const market = await marketService.createMarket(marketData);
+    if (market) {
+      await orderService.initializeOrderBook(market.id);
+      testMarketId = market.id;
+    } else {
+      throw new Error("Failed to create test market");
+    }
   }
 
   describe("Market Creation", () => {
     it("should create a new market", async () => {
       // Create ETH asset first
-      const ethAssetResponse = await request(app.getHttpServer())
-        .post("/assets")
-        .send({
-          symbol: "ETH",
-          name: "Ethereum",
-          type: "crypto",
-          decimals: 8,
-          isActive: true,
-        })
-        .expect(201);
+      const assetService = moduleFixture.get<AssetService>(AssetService);
+      const ethAsset = await assetService.createAsset({
+        symbol: "ETH",
+        name: "Ethereum",
+        type: "crypto",
+        decimals: 8,
+        isActive: true,
+      });
 
-      const marketData = {
+      const marketData: CreateMarketDto = {
         name: "Test Ethereum Market",
         symbol: "ETH/USD",
-        category: "crypto",
+        category: "crypto" as MarketCategory,
         baseAsset: "ETH",
         quoteAsset: "USD",
-        baseAssetId: ethAssetResponse.body.id,
+        baseAssetId: ethAsset.id,
         quoteAssetId: usdAssetId,
         minPriceIncrement: 0.01,
         minQuantityIncrement: 0.001,
@@ -105,12 +112,15 @@ describe("Exchange (e2e)", () => {
         timezone: "UTC",
       };
 
-      const response = await request(app.getHttpServer())
-        .post("/markets")
-        .send(marketData)
-        .expect(201);
+      const marketService = moduleFixture.get<MarketService>(MarketService);
+      const orderService = moduleFixture.get<OrderService>(OrderService);
+      const market = await marketService.createMarket(marketData);
+      if (!market) {
+        throw new Error("Failed to create market");
+      }
+      await orderService.initializeOrderBook(market.id);
 
-      expect(response.body).toMatchObject({
+      expect(market).toMatchObject({
         name: marketData.name,
         symbol: marketData.symbol,
         category: marketData.category,
@@ -118,7 +128,7 @@ describe("Exchange (e2e)", () => {
         quoteAsset: "USD",
         isActive: true,
       });
-      expect(response.body.id).toBeDefined();
+      expect(market.id).toBeDefined();
     });
 
     it("should get market by id", async () => {
