@@ -6,13 +6,8 @@ import {
   IsBoolean,
   IsUUID,
   IsIn,
-  IsArray,
-  ValidateNested,
 } from "class-validator";
-import { Type } from "class-transformer";
 import { BusinessType } from "../types/business-type";
-import { CreateBusinessInputDto } from "./create-business-input.dto";
-import { CreateBusinessOutputDto } from "./create-business-output.dto";
 
 export class CreateBusinessDto {
   @ApiProperty({
@@ -69,28 +64,6 @@ export class CreateBusinessDto {
   @IsUUID()
   @IsNotEmpty()
   corporationId: string;
-
-  @ApiProperty({
-    description: "List of input requirements for this business",
-    type: [CreateBusinessInputDto],
-    required: false,
-  })
-  @IsArray()
-  @IsOptional()
-  @ValidateNested({ each: true })
-  @Type(() => CreateBusinessInputDto)
-  inputs?: CreateBusinessInputDto[];
-
-  @ApiProperty({
-    description: "List of outputs produced by this business",
-    type: [CreateBusinessOutputDto],
-    required: false,
-  })
-  @IsArray()
-  @IsOptional()
-  @ValidateNested({ each: true })
-  @Type(() => CreateBusinessOutputDto)
-  outputs?: CreateBusinessOutputDto[];
 
   @ApiProperty({
     description: "Whether the business is active",

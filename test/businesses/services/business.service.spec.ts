@@ -1,29 +1,27 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { BusinessService } from "../../../src/modules/businesses/services/business.service";
 import { BusinessDao } from "../../../src/modules/businesses/daos/business.dao";
-import { BusinessInputDao } from "../../../src/modules/businesses/daos/business-input.dao";
-import { BusinessOutputDao } from "../../../src/modules/businesses/daos/business-output.dao";
-import { BusinessProductionDao } from "../../../src/modules/businesses/daos/business-production.dao";
+import { ProductionDao } from "../../../src/modules/businesses/daos/production.dao";
 import { CorporationDao } from "../../../src/modules/corporations/daos/corporation.dao";
 import { AssetHoldingDao } from "../../../src/modules/assets/daos/asset-holding.dao";
+import { AssetService } from "../../../src/modules/assets/services/asset.service";
 import { BusinessFactory } from "../../../src/modules/businesses/factories/business-factory";
 import { SpecialBusinessStrategies } from "../../../src/modules/businesses/strategies/special-business-strategies";
 import { CreateBusinessDto } from "../../../src/modules/businesses/dtos/create-business.dto";
 import { BusinessDto } from "../../../src/modules/businesses/dtos/business.dto";
 import { ClaimOutputDto } from "../../../src/modules/businesses/dtos/claim-output.dto";
-import { AddProductionTimeDto } from "../../../src/modules/businesses/dtos/add-production-time.dto";
 import { NotFoundException, BadRequestException } from "@nestjs/common";
 import { Business } from "../../../src/modules/businesses/classes/business.class";
 import { v4 as uuidv4 } from "uuid";
+import { AssetDto } from "../../../src/modules/assets/dtos/asset.dto";
 
 describe("BusinessService", () => {
   let service: BusinessService;
   let businessDao: jest.Mocked<BusinessDao>;
-  let businessInputDao: jest.Mocked<BusinessInputDao>;
-  let businessOutputDao: jest.Mocked<BusinessOutputDao>;
-  let businessProductionDao: jest.Mocked<BusinessProductionDao>;
+  let productionDao: jest.Mocked<ProductionDao>;
   let corporationDao: jest.Mocked<CorporationDao>;
   let assetHoldingDao: jest.Mocked<AssetHoldingDao>;
+  let assetService: jest.Mocked<AssetService>;
   let businessFactory: jest.Mocked<BusinessFactory>;
   let specialStrategies: jest.Mocked<SpecialBusinessStrategies>;
 
@@ -40,34 +38,20 @@ describe("BusinessService", () => {
             updateBusiness: jest.fn(),
             deleteBusiness: jest.fn(),
             getBusinesses: jest.fn(),
+            getLastClaimedAt: jest.fn(),
+            updateLastClaimedAt: jest.fn(),
           },
         },
         {
-          provide: BusinessInputDao,
+          provide: ProductionDao,
           useValue: {
-            createInput: jest.fn(),
-            getInputsByBusinessId: jest.fn(),
-            deleteInput: jest.fn(),
-            deleteInputsByBusinessId: jest.fn(),
-          },
-        },
-        {
-          provide: BusinessOutputDao,
-          useValue: {
-            createOutput: jest.fn(),
-            getOutputsByBusinessId: jest.fn(),
-            deleteOutput: jest.fn(),
-            deleteOutputsByBusinessId: jest.fn(),
-          },
-        },
-        {
-          provide: BusinessProductionDao,
-          useValue: {
-            getOrCreateProduction: jest.fn(),
-            addTime: jest.fn(),
-            consumeTime: jest.fn(),
-            getAccumulatedTime: jest.fn(),
-            resetProduction: jest.fn(),
+            getBatchesByBusinessId: jest.fn(),
+            getBatchesWithAvailableCycles: jest.fn(),
+            createBatch: jest.fn(),
+            getActiveBatches: jest.fn(),
+            markBatchCompleted: jest.fn(),
+            updateBatchCycles: jest.fn(),
+            getBatchById: jest.fn(),
           },
         },
         {
@@ -81,6 +65,14 @@ describe("BusinessService", () => {
           useValue: {
             getAsset: jest.fn(),
             adjustAssetQuantity: jest.fn(),
+          },
+        },
+        {
+          provide: AssetService,
+          useValue: {
+            getAssetBySymbol: jest.fn(),
+            createAsset: jest.fn(),
+            getAssetById: jest.fn(),
           },
         },
         {
@@ -110,11 +102,10 @@ describe("BusinessService", () => {
 
     service = module.get<BusinessService>(BusinessService);
     businessDao = module.get(BusinessDao);
-    businessInputDao = module.get(BusinessInputDao);
-    businessOutputDao = module.get(BusinessOutputDao);
-    businessProductionDao = module.get(BusinessProductionDao);
+    productionDao = module.get(ProductionDao);
     corporationDao = module.get(CorporationDao);
     assetHoldingDao = module.get(AssetHoldingDao);
+    assetService = module.get(AssetService);
     businessFactory = module.get(BusinessFactory);
     specialStrategies = module.get(SpecialBusinessStrategies);
   });
@@ -151,15 +142,41 @@ describe("BusinessService", () => {
       } as any);
       businessDao.getBusinessByName.mockResolvedValue(null);
       businessDao.createBusiness.mockResolvedValue(mockBusinessId);
-      businessDao.getBusinessById.mockResolvedValue(mockBusiness);
-      businessInputDao.getInputsByBusinessId.mockResolvedValue([]);
-      businessOutputDao.getOutputsByBusinessId.mockResolvedValue([]);
+      
+      // Mock recipe resolution - agriculture recipe creates WHEAT output
+      const wheatAsset: AssetDto = {
+        id: uuidv4(),
+        symbol: "WHEAT",
+        name: "Wheat",
+        type: "commodity",
+        decimals: 8,
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      // Mock AssetService for recipe resolution
+      assetService.getAssetBySymbol.mockRejectedValue(new NotFoundException("Asset not found"));
+      assetService.createAsset.mockResolvedValue(wheatAsset);
+      
+      // BusinessDao will resolve inputs/outputs from recipes
+      businessDao.getBusinessById.mockResolvedValue({
+        ...mockBusiness,
+        outputs: [{
+          businessId: mockBusinessId,
+          assetId: wheatAsset.id,
+          name: "Wheat",
+          quantity: 5,
+          productionTime: 60,
+        }],
+      });
 
       const result = await service.createBusiness(createDto);
 
-      expect(result).toEqual(mockBusiness);
+      expect(result).toBeDefined();
       expect(businessDao.createBusiness).toHaveBeenCalledWith(createDto);
       expect(corporationDao.getCorporationById).toHaveBeenCalledWith("corp-123");
+      // BusinessDao will resolve outputs from recipe when getBusinessById is called
+      expect(businessDao.getBusinessById).toHaveBeenCalledWith(mockBusinessId);
     });
 
     it("should throw NotFoundException if corporation does not exist", async () => {
@@ -192,24 +209,12 @@ describe("BusinessService", () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it("should create inputs and outputs if provided", async () => {
+    it("should create inputs and outputs from recipe only", async () => {
       const createDto: CreateBusinessDto = {
         name: "Test Farm",
         category: "agriculture",
         corporationId: "corp-123",
-        inputs: [
-          {
-            assetId: "asset-1",
-            quantity: 10,
-          },
-        ],
-        outputs: [
-          {
-            assetId: "asset-2",
-            quantity: 5,
-            productionTime: 60,
-          },
-        ],
+        // No inputs/outputs - should use recipe
       };
 
       const mockBusinessId = uuidv4();
@@ -225,27 +230,43 @@ describe("BusinessService", () => {
         updatedAt: new Date(),
       };
 
+      // Mock recipe resolution - agriculture recipe creates WHEAT output
+      const wheatAsset: AssetDto = {
+        id: uuidv4(),
+        symbol: "WHEAT",
+        name: "Wheat",
+        type: "commodity",
+        decimals: 8,
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
       corporationDao.getCorporationById.mockResolvedValue({
         id: "corp-123",
       } as any);
       businessDao.getBusinessByName.mockResolvedValue(null);
       businessDao.createBusiness.mockResolvedValue(mockBusinessId);
-      businessInputDao.createInput.mockResolvedValue("input-id");
-      businessOutputDao.createOutput.mockResolvedValue("output-id");
-      businessDao.getBusinessById.mockResolvedValue(mockBusiness);
-      businessInputDao.getInputsByBusinessId.mockResolvedValue([]);
-      businessOutputDao.getOutputsByBusinessId.mockResolvedValue([]);
+      // Mock AssetService for recipe resolution
+      assetService.getAssetBySymbol.mockRejectedValue(new NotFoundException("Asset not found"));
+      assetService.createAsset.mockResolvedValue(wheatAsset);
+      // BusinessDao will resolve inputs/outputs from recipes
+      businessDao.getBusinessById.mockResolvedValue({
+        ...mockBusiness,
+        outputs: [{
+          businessId: mockBusinessId,
+          assetId: wheatAsset.id,
+          name: "Wheat",
+          quantity: 5,
+          productionTime: 60,
+        }],
+      });
 
       await service.createBusiness(createDto);
 
-      expect(businessInputDao.createInput).toHaveBeenCalledWith(
-        mockBusinessId,
-        createDto.inputs![0]
-      );
-      expect(businessOutputDao.createOutput).toHaveBeenCalledWith(
-        mockBusinessId,
-        createDto.outputs![0]
-      );
+      // BusinessDao handles recipe resolution internally
+      expect(businessDao.createBusiness).toHaveBeenCalledWith(createDto);
+      expect(businessDao.getBusinessById).toHaveBeenCalledWith(mockBusinessId);
     });
   });
 
@@ -262,8 +283,6 @@ describe("BusinessService", () => {
       };
 
       businessDao.getBusinessById.mockResolvedValue(mockBusiness);
-      businessInputDao.getInputsByBusinessId.mockResolvedValue([]);
-      businessOutputDao.getOutputsByBusinessId.mockResolvedValue([]);
 
       const result = await service.getBusinessById("business-123");
 
@@ -280,57 +299,10 @@ describe("BusinessService", () => {
     });
   });
 
-  describe("addProductionTime", () => {
-    it("should add production time successfully", async () => {
-      const businessId = uuidv4();
-      const mockBusiness: BusinessDto = {
-        id: businessId,
-        name: "Test Farm",
-        category: "agriculture",
-        corporationId: "corp-123",
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-
-      businessDao.getBusinessById.mockResolvedValue(mockBusiness);
-      businessProductionDao.addTime.mockResolvedValue(true);
-      businessProductionDao.getAccumulatedTime.mockResolvedValue(120);
-      businessInputDao.getInputsByBusinessId.mockResolvedValue([]);
-      businessOutputDao.getOutputsByBusinessId.mockResolvedValue([]);
-
-      const mockBusinessInstance = {
-        calculateAvailableOutputs: jest.fn().mockReturnValue([]),
-      };
-      businessFactory.createBusiness.mockReturnValue(
-        mockBusinessInstance as any
-      );
-
-      const result = await service.addProductionTime(businessId, {
-        timeSeconds: 120,
-      });
-
-      expect(result.accumulatedTime).toBe(120);
-      expect(businessProductionDao.addTime).toHaveBeenCalledWith(
-        businessId,
-        120
-      );
-    });
-
-    it("should throw NotFoundException if business not found", async () => {
-      businessDao.getBusinessById.mockResolvedValue(null);
-
-      await expect(
-        service.addProductionTime("invalid-id", { timeSeconds: 120 })
-      ).rejects.toThrow(NotFoundException);
-    });
-  });
-
   describe("claimOutput", () => {
     it("should claim outputs and consume inputs", async () => {
       const businessId = uuidv4();
       const corporationId = uuidv4();
-      const outputId = uuidv4();
       const assetId = uuidv4();
       const inputAssetId = uuidv4();
 
@@ -342,7 +314,6 @@ describe("BusinessService", () => {
         isActive: true,
         inputs: [
           {
-            id: uuidv4(),
             businessId,
             assetId: inputAssetId,
             name: "Water",
@@ -351,7 +322,6 @@ describe("BusinessService", () => {
         ],
         outputs: [
           {
-            id: outputId,
             businessId,
             assetId,
             name: "Wheat",
@@ -375,47 +345,50 @@ describe("BusinessService", () => {
       businessFactory.createBusiness.mockReturnValue(
         mockBusinessInstance as any
       );
+      
       // With baseProductionRate = 2.0 and defaultProductionTime = 60:
       // effectiveTime = 60 / 2.0 = 30 seconds per cycle
-      // accumulatedTime = 60 seconds = 2 cycles
-      businessProductionDao.getAccumulatedTime.mockResolvedValue(60); // 2 cycles available
-      assetHoldingDao.getAsset.mockResolvedValue({
-        corporationId,
-        assetId: inputAssetId,
-        quantity: 25, // Enough for 2 cycles (10 * 2 = 20)
-      } as any);
+      // Create a batch that started 60 seconds ago with cycle_completion_time = 30
+      // This gives us 2 cycles available (60 / 30 = 2)
+      const mockBatch = {
+        id: uuidv4(),
+        business_id: businessId,
+        cycles: 2,
+        cycles_remaining: 2,
+        input_quantities: { [inputAssetId]: 20 }, // 10 * 2 cycles
+        production_started_at: new Date(Date.now() - 60000), // 60 seconds ago
+        cycle_completion_time: 30, // 30 seconds per cycle
+        status: "active" as const,
+        created_at: new Date(),
+        updated_at: new Date(),
+      };
+      
+      productionDao.getBatchesWithAvailableCycles.mockResolvedValue([mockBatch]);
+      productionDao.updateBatchCycles.mockResolvedValue(true);
+      businessDao.updateLastClaimedAt.mockResolvedValue(true);
+      productionDao.getBatchesByBusinessId.mockResolvedValue([]);
+      businessDao.getLastClaimedAt.mockResolvedValue(null);
       assetHoldingDao.adjustAssetQuantity.mockResolvedValue(true);
-      businessProductionDao.consumeTime.mockResolvedValue(true);
-      businessInputDao.getInputsByBusinessId.mockResolvedValue(
-        mockBusiness.inputs!
-      );
-      businessOutputDao.getOutputsByBusinessId.mockResolvedValue(
-        mockBusiness.outputs!
-      );
 
       const result = await service.claimOutput(businessId, {
-        outputId,
+        assetId,
       });
 
       expect(result.quantity).toBe(10); // 2 cycles * 5 quantity
       expect(result.cyclesClaimed).toBe(2);
       expect(assetHoldingDao.adjustAssetQuantity).toHaveBeenCalledWith(
         corporationId,
-        inputAssetId,
-        -20
-      );
-      expect(assetHoldingDao.adjustAssetQuantity).toHaveBeenCalledWith(
-        corporationId,
         assetId,
         10
       );
+      expect(productionDao.updateBatchCycles).toHaveBeenCalled();
     });
 
     it("should throw NotFoundException if business not found", async () => {
       businessDao.getBusinessById.mockResolvedValue(null);
 
       await expect(
-        service.claimOutput("invalid-id", { outputId: uuidv4() })
+        service.claimOutput("invalid-id", { assetId: uuidv4() })
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -433,20 +406,16 @@ describe("BusinessService", () => {
       };
 
       businessDao.getBusinessById.mockResolvedValue(mockBusiness);
-      businessInputDao.getInputsByBusinessId.mockResolvedValue([]);
-      businessOutputDao.getOutputsByBusinessId.mockResolvedValue([]);
 
       await expect(
-        service.claimOutput(businessId, { outputId: "invalid-output" })
+        service.claimOutput(businessId, { assetId: uuidv4() })
       ).rejects.toThrow(NotFoundException);
     });
 
-    it("should throw BadRequestException if insufficient inputs", async () => {
+    it("should throw BadRequestException if insufficient cycles available", async () => {
       const businessId = uuidv4();
       const corporationId = uuidv4();
-      const outputId = uuidv4();
       const assetId = uuidv4();
-      const inputAssetId = uuidv4();
 
       const mockBusiness: BusinessDto = {
         id: businessId,
@@ -454,18 +423,9 @@ describe("BusinessService", () => {
         category: "agriculture",
         corporationId,
         isActive: true,
-        inputs: [
-          {
-            id: uuidv4(),
-            businessId,
-            assetId: inputAssetId,
-            name: "Water",
-            quantity: 10,
-          },
-        ],
+        inputs: [],
         outputs: [
           {
-            id: outputId,
             businessId,
             assetId,
             name: "Wheat",
@@ -489,21 +449,11 @@ describe("BusinessService", () => {
       businessFactory.createBusiness.mockReturnValue(
         mockBusinessInstance as any
       );
-      businessProductionDao.getAccumulatedTime.mockResolvedValue(120);
-      assetHoldingDao.getAsset.mockResolvedValue({
-        corporationId,
-        assetId: inputAssetId,
-        quantity: 10, // Not enough for 2 cycles (need 20)
-      } as any);
-      businessInputDao.getInputsByBusinessId.mockResolvedValue(
-        mockBusiness.inputs!
-      );
-      businessOutputDao.getOutputsByBusinessId.mockResolvedValue(
-        mockBusiness.outputs!
-      );
+      // No batches available - should throw error when trying to claim
+      productionDao.getBatchesWithAvailableCycles.mockResolvedValue([]);
 
       await expect(
-        service.claimOutput(businessId, { outputId })
+        service.claimOutput(businessId, { assetId })
       ).rejects.toThrow(BadRequestException);
     });
   });

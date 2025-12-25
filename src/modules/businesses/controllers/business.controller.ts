@@ -22,10 +22,11 @@ import { CreateBusinessDto } from "../dtos/create-business.dto";
 import { UpdateBusinessDto } from "../dtos/update-business.dto";
 import { BusinessFiltersDto } from "../dtos/business-filters.dto";
 import { BusinessDto } from "../dtos/business.dto";
-import { AddProductionTimeDto } from "../dtos/add-production-time.dto";
+import { AddProductionInputsDto } from "../dtos/add-production-inputs.dto";
 import { ClaimOutputDto } from "../dtos/claim-output.dto";
 import { ClaimOutputResultDto } from "../dtos/claim-output-result.dto";
 import { BusinessProductionProgressDto } from "../dtos/business-production-progress.dto";
+import { ProductionBatchDto } from "../dtos/production-batch.dto";
 
 @ApiTags("Businesses")
 @Controller("businesses")
@@ -167,32 +168,33 @@ export class BusinessController {
     return this.businessService.getSupportedBusinessTypes();
   }
 
-  @Post(":id/production/time")
+  @Post(":id/production/inputs")
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: "Add production time to a business",
+    summary: "Add production inputs to start a production batch",
     description:
-      "Adds time to a business's production accumulator. This time is used to calculate available outputs.",
+      "Adds inputs to a business to start a new production batch. The system calculates how many cycles can be produced based on the scarcest input. Multiple batches can run concurrently.",
   })
   @ApiParam({ name: "id", description: "Business ID" })
   @ApiResponse({
     status: 200,
-    description: "Production time added successfully",
+    description: "Production inputs added successfully, batch created",
     type: BusinessProductionProgressDto,
   })
   @ApiResponse({ status: 404, description: "Business not found" })
-  async addProductionTime(
+  @ApiResponse({ status: 400, description: "Insufficient inputs or invalid request" })
+  async addProductionInputs(
     @Param("id") id: string,
-    @Body() addTimeDto: AddProductionTimeDto
+    @Body() inputsDto: AddProductionInputsDto
   ): Promise<BusinessProductionProgressDto> {
-    return this.businessService.addProductionTime(id, addTimeDto);
+    return this.businessService.addProductionInputs(id, inputsDto);
   }
 
   @Get(":id/production/progress")
   @ApiOperation({
     summary: "Get production progress for a business",
     description:
-      "Returns the current production progress including accumulated time and available outputs",
+      "Returns the current production progress including all batches, available cycles, and available outputs. Cycles are calculated in real-time based on elapsed time.",
   })
   @ApiParam({ name: "id", description: "Business ID" })
   @ApiResponse({
@@ -205,6 +207,25 @@ export class BusinessController {
     @Param("id") id: string
   ): Promise<BusinessProductionProgressDto> {
     return this.businessService.getProductionProgress(id);
+  }
+
+  @Get(":id/production/batches")
+  @ApiOperation({
+    summary: "Get all production batches for a business",
+    description:
+      "Returns all production batches (active, completed, and claimed) for a business. Useful for displaying production status on the frontend.",
+  })
+  @ApiParam({ name: "id", description: "Business ID" })
+  @ApiResponse({
+    status: 200,
+    description: "Production batches retrieved successfully",
+    type: [ProductionBatchDto],
+  })
+  @ApiResponse({ status: 404, description: "Business not found" })
+  async getBusinessProductionBatches(
+    @Param("id") id: string
+  ): Promise<ProductionBatchDto[]> {
+    return this.businessService.getBusinessProductionBatches(id);
   }
 
   @Post(":id/production/claim")

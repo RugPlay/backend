@@ -1,7 +1,6 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { BusinessDao } from "../../../src/modules/businesses/daos/business.dao";
-import { BusinessInputDao } from "../../../src/modules/businesses/daos/business-input.dao";
-import { BusinessOutputDao } from "../../../src/modules/businesses/daos/business-output.dao";
+import { AssetService } from "../../../src/modules/assets/services/asset.service";
 import { CreateBusinessDto } from "../../../src/modules/businesses/dtos/create-business.dto";
 import { BusinessFiltersDto } from "../../../src/modules/businesses/dtos/business-filters.dto";
 import { UpdateBusinessDto } from "../../../src/modules/businesses/dtos/update-business.dto";
@@ -10,8 +9,7 @@ import { v4 as uuidv4 } from "uuid";
 
 describe("BusinessDao (Integration)", () => {
   let dao: BusinessDao;
-  let businessInputDao: BusinessInputDao;
-  let businessOutputDao: BusinessOutputDao;
+  let assetService: AssetService;
   let kysely: any;
   let module: TestingModule;
   let testCorporationId: string;
@@ -48,13 +46,13 @@ describe("BusinessDao (Integration)", () => {
       deleteFrom: jest.fn().mockReturnValue(createQueryBuilder()),
     };
 
-    // Mock BusinessInputDao and BusinessOutputDao
-    const mockBusinessInputDao = {
-      getInputsByBusinessId: jest.fn().mockResolvedValue([]),
-    };
-
-    const mockBusinessOutputDao = {
-      getOutputsByBusinessId: jest.fn().mockResolvedValue([]),
+    // Mock AssetService for recipe resolution
+    const mockAssetService = {
+      getAssetBySymbol: jest.fn().mockResolvedValue({
+        id: uuidv4(),
+        symbol: "WHEAT",
+        name: "Wheat",
+      }),
     };
 
     module = await Test.createTestingModule({
@@ -65,19 +63,14 @@ describe("BusinessDao (Integration)", () => {
           useValue: kysely,
         },
         {
-          provide: BusinessInputDao,
-          useValue: mockBusinessInputDao,
-        },
-        {
-          provide: BusinessOutputDao,
-          useValue: mockBusinessOutputDao,
+          provide: AssetService,
+          useValue: mockAssetService,
         },
       ],
     }).compile();
 
     dao = module.get<BusinessDao>(BusinessDao);
-    businessInputDao = module.get<BusinessInputDao>(BusinessInputDao);
-    businessOutputDao = module.get<BusinessOutputDao>(BusinessOutputDao);
+    assetService = module.get<AssetService>(AssetService);
     (dao as any).kysely = kysely;
   });
 

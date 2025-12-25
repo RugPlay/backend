@@ -1,27 +1,28 @@
 import { Injectable } from "@nestjs/common";
 import { KyselyDao } from "@/database/kysely/kysely.dao";
 import { InjectKysely } from "nestjs-kysely";
-import { Kysely } from "kysely";
+import { Kysely, sql } from "kysely";
 import { DB } from "@/database/types/db";
 import { CreateBusinessDto } from "../dtos/create-business.dto";
 import { UpdateBusinessDto } from "../dtos/update-business.dto";
 import { BusinessFiltersDto } from "../dtos/business-filters.dto";
 import { BusinessDto } from "../dtos/business.dto";
-import { BusinessInputDao } from "./business-input.dao";
-import { BusinessOutputDao } from "./business-output.dao";
+import { BusinessInputDto } from "../dtos/business-input.dto";
+import { BusinessOutputDto } from "../dtos/business-output.dto";
+import { getBusinessTypeConfig } from "../config/business-type-config";
+import { AssetService } from "../../assets/services/asset.service";
 
 @Injectable()
 export class BusinessDao extends KyselyDao<BusinessDao> {
   constructor(
     @InjectKysely() kysely: Kysely<DB>,
-    private readonly businessInputDao: BusinessInputDao,
-    private readonly businessOutputDao: BusinessOutputDao
+    private readonly assetService: AssetService
   ) {
     super(kysely);
   }
   /**
    * Insert a new business into the database
-   * Note: Inputs and outputs should be created separately using BusinessInputDao and BusinessOutputDao
+   * Note: Inputs and outputs are resolved from recipes dynamically, not stored in the database
    */
   async createBusiness(business: CreateBusinessDto): Promise<string | null> {
     try {
@@ -61,9 +62,9 @@ export class BusinessDao extends KyselyDao<BusinessDao> {
 
       const business = this.mapRecordToDto(result);
       
-      // Load inputs and outputs
-      business.inputs = await this.businessInputDao.getInputsByBusinessId(id);
-      business.outputs = await this.businessOutputDao.getOutputsByBusinessId(id);
+      // Derive inputs and outputs from recipe
+      business.inputs = await this.resolveInputsFromRecipe(business.category, business.id);
+      business.outputs = await this.resolveOutputsFromRecipe(business.category, business.id);
       
       return business;
     } catch (error) {
@@ -115,10 +116,10 @@ export class BusinessDao extends KyselyDao<BusinessDao> {
       const results = await query.orderBy("name", "asc").execute();
       const businesses = results.map((record) => this.mapRecordToDto(record));
       
-      // Load inputs and outputs for each business
+      // Derive inputs and outputs from recipes for each business
       for (const business of businesses) {
-        business.inputs = await this.businessInputDao.getInputsByBusinessId(business.id);
-        business.outputs = await this.businessOutputDao.getOutputsByBusinessId(business.id);
+        business.inputs = await this.resolveInputsFromRecipe(business.category, business.id);
+        business.outputs = await this.resolveOutputsFromRecipe(business.category, business.id);
       }
       
       return businesses;
@@ -211,6 +212,122 @@ export class BusinessDao extends KyselyDao<BusinessDao> {
     dto.createdAt = record.created_at;
     dto.updatedAt = record.updated_at;
     return dto;
+  }
+
+  /**
+   * Resolve inputs from business type recipe
+   */
+  private async resolveInputsFromRecipe(
+    category: string,
+    businessId: string
+  ): Promise<BusinessInputDto[]> {
+    try {
+      const config = getBusinessTypeConfig(category as any);
+      const recipe = config.recipe;
+      const inputs: BusinessInputDto[] = [];
+
+      if (!recipe.inputs || recipe.inputs.length === 0) {
+        return [];
+      }
+
+      for (const recipeInput of recipe.inputs) {
+        try {
+          const asset = await this.assetService.getAssetBySymbol(recipeInput.assetSymbol);
+          inputs.push({
+            businessId,
+            assetId: asset.id,
+            quantity: recipeInput.quantity,
+            name: recipeInput.assetName,
+          });
+        } catch (error) {
+          // Asset doesn't exist yet, skip it (will be created when needed)
+          console.warn(`Asset ${recipeInput.assetSymbol} not found, skipping input`);
+        }
+      }
+
+      return inputs;
+    } catch (error) {
+      console.error("Error resolving inputs from recipe:", error);
+      return [];
+    }
+  }
+
+  /**
+   * Resolve outputs from business type recipe
+   */
+  private async resolveOutputsFromRecipe(
+    category: string,
+    businessId: string
+  ): Promise<BusinessOutputDto[]> {
+    try {
+      const config = getBusinessTypeConfig(category as any);
+      const recipe = config.recipe;
+      const outputs: BusinessOutputDto[] = [];
+
+      if (!recipe.outputs || recipe.outputs.length === 0) {
+        return [];
+      }
+
+      for (const recipeOutput of recipe.outputs) {
+        try {
+          const asset = await this.assetService.getAssetBySymbol(recipeOutput.assetSymbol);
+          outputs.push({
+            businessId,
+            assetId: asset.id,
+            quantity: recipeOutput.quantity,
+            name: recipeOutput.assetName,
+            productionTime: recipeOutput.productionTime,
+          });
+        } catch (error) {
+          // Asset doesn't exist yet, skip it (will be created when needed)
+          console.warn(`Asset ${recipeOutput.assetSymbol} not found, skipping output`);
+        }
+      }
+
+      return outputs;
+    } catch (error) {
+      console.error("Error resolving outputs from recipe:", error);
+      return [];
+    }
+  }
+
+  /**
+   * Get last claimed timestamp for a business
+   */
+  async getLastClaimedAt(businessId: string): Promise<Date | null> {
+    try {
+      const result = await this.kysely
+        .selectFrom("businesses")
+        .select("last_claimed_at" as any)
+        .where("id", "=", businessId)
+        .executeTakeFirst();
+
+      return (result as any)?.last_claimed_at || null;
+    } catch (error) {
+      console.error("Error getting last claimed at:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Update last claimed timestamp for a business
+   */
+  async updateLastClaimedAt(businessId: string): Promise<boolean> {
+    try {
+      const result = await this.kysely
+        .updateTable("businesses")
+        .set({
+          last_claimed_at: sql`now()`,
+          updated_at: sql`now()`,
+        } as any)
+        .where("id", "=", businessId)
+        .executeTakeFirst();
+
+      return result.numUpdatedRows > 0;
+    } catch (error) {
+      console.error("Error updating last claimed at:", error);
+      return false;
+    }
   }
 }
 

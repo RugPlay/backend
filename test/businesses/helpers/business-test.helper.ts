@@ -27,6 +27,7 @@ export class BusinessTestHelper {
 
   /**
    * Create a test business with inputs and outputs
+   * Note: Inputs and outputs are now created from recipes automatically
    */
   static async createTestBusinessWithIO(
     businessService: BusinessService,
@@ -34,83 +35,76 @@ export class BusinessTestHelper {
     corporationId: string,
     category: BusinessType
   ): Promise<{ business: BusinessDto; inputAssetId: string; outputAssetId: string }> {
-    // Create test assets - use shorter symbols to fit varchar(20) limit
-    const timestamp = Date.now().toString().slice(-6); // Last 6 digits
-    const inputAsset = await assetService.createAsset({
-      symbol: `IN${timestamp}`,
-      name: "Input Asset",
-      type: "commodity",
-    });
-
-    const outputAsset = await assetService.createAsset({
-      symbol: `OUT${timestamp}`,
-      name: "Output Asset",
-      type: "commodity",
-    });
-
+    // Create business - inputs/outputs will be created from recipe
     const business = await businessService.createBusiness({
-      name: `Test ${category} Business`,
+      name: `Test ${category} Business ${Date.now()}`,
       category,
       corporationId,
-      inputs: [
-        {
-          assetId: inputAsset.id,
-          quantity: 10,
-        },
-      ],
-      outputs: [
-        {
-          assetId: outputAsset.id,
-          quantity: 5,
-          productionTime: 60,
-        },
-      ],
+      // No inputs/outputs - recipe will create them
     });
+
+    // Get the first input and output from the created business
+    const inputAssetId = business.inputs && business.inputs.length > 0 
+      ? business.inputs[0].assetId 
+      : "";
+    const outputAssetId = business.outputs && business.outputs.length > 0 
+      ? business.outputs[0].assetId 
+      : "";
 
     return {
       business,
-      inputAssetId: inputAsset.id,
-      outputAssetId: outputAsset.id,
+      inputAssetId,
+      outputAssetId,
     };
   }
 
   /**
    * Create a test agriculture business with wheat output
+   * Outputs are now automatically created from recipe, but we still return the asset ID
    */
   static async createTestAgricultureBusiness(
     businessService: BusinessService,
     assetService: AssetService,
     corporationId: string
   ): Promise<{ business: BusinessDto; wheatAssetId: string }> {
-    // Use shorter symbol to fit varchar(20) limit - max 20 chars
-    const timestamp = Date.now().toString().slice(-6); // Last 6 digits
-    const wheatAsset = await assetService.createAsset({
-      symbol: `WHT${timestamp}`,
-      name: "Wheat",
-      type: "commodity",
-    });
-
+    // Create business - outputs will be created automatically from recipe
     const business = await businessService.createBusiness({
       name: `Test Farm ${Date.now()}`,
       category: "agriculture",
       corporationId,
-      outputs: [
-        {
-          assetId: wheatAsset.id,
-          quantity: 5,
-          productionTime: 60,
-        },
-      ],
+      // No outputs needed - recipe will create WHEAT output automatically
     });
+
+    // Get the wheat asset ID from the created output
+    // The recipe creates a WHEAT asset, so we need to find it
+    let wheatAssetId: string;
+    if (business.outputs && business.outputs.length > 0) {
+      wheatAssetId = business.outputs[0].assetId;
+    } else {
+      // Fallback: try to get WHEAT asset by symbol
+      try {
+        const wheatAsset = await assetService.getAssetBySymbol("WHEAT");
+        wheatAssetId = wheatAsset.id;
+      } catch {
+        // If not found, create it (shouldn't happen with recipe system)
+        const wheatAsset = await assetService.createAsset({
+          symbol: "WHEAT",
+          name: "Wheat",
+          type: "commodity",
+        });
+        wheatAssetId = wheatAsset.id;
+      }
+    }
 
     return {
       business,
-      wheatAssetId: wheatAsset.id,
+      wheatAssetId,
     };
   }
 
   /**
    * Create a test manufacturing business with inputs and outputs
+   * Inputs and outputs are now automatically created from recipe
    */
   static async createTestManufacturingBusiness(
     businessService: BusinessService,
@@ -119,40 +113,42 @@ export class BusinessTestHelper {
     wheatAssetId: string,
     ironAssetId: string
   ): Promise<{ business: BusinessDto; manufacturedGoodsAssetId: string }> {
-    // Use shorter symbol to fit varchar(20) limit - max 20 chars
-    const timestamp = Date.now().toString().slice(-6); // Last 6 digits
-    const manufacturedGoodsAsset = await assetService.createAsset({
-      symbol: `MFG${timestamp}`,
-      name: "Manufactured Goods",
-      type: "commodity",
-    });
-
+    // Create business - inputs and outputs will be created automatically from recipe
+    // But we can still pass custom inputs if needed (recipe will use them)
+    // Create business - recipe will create inputs (WHEAT, IRON) and output (MFG_GOODS) automatically
     const business = await businessService.createBusiness({
       name: `Test Factory ${Date.now()}`,
       category: "industry_manufacturing",
       corporationId,
-      inputs: [
-        {
-          assetId: wheatAssetId,
-          quantity: 2,
-        },
-        {
-          assetId: ironAssetId,
-          quantity: 1,
-        },
-      ],
-      outputs: [
-        {
-          assetId: manufacturedGoodsAsset.id,
-          quantity: 1,
-          productionTime: 300,
-        },
-      ],
+      // No inputs/outputs - recipe will create them
     });
+
+    // After creation, we can add custom inputs if needed using addBusinessInput
+    // For now, we'll use the recipe inputs
+
+    // Get the manufactured goods asset ID from the created output
+    let manufacturedGoodsAssetId: string;
+    if (business.outputs && business.outputs.length > 0) {
+      manufacturedGoodsAssetId = business.outputs[0].assetId;
+    } else {
+      // Fallback: try to get MFG_GOODS asset by symbol
+      try {
+        const mfgAsset = await assetService.getAssetBySymbol("MFG_GOODS");
+        manufacturedGoodsAssetId = mfgAsset.id;
+      } catch {
+        // If not found, create it (shouldn't happen with recipe system)
+        const mfgAsset = await assetService.createAsset({
+          symbol: "MFG_GOODS",
+          name: "Manufactured Goods",
+          type: "commodity",
+        });
+        manufacturedGoodsAssetId = mfgAsset.id;
+      }
+    }
 
     return {
       business,
-      manufacturedGoodsAssetId: manufacturedGoodsAsset.id,
+      manufacturedGoodsAssetId,
     };
   }
 }

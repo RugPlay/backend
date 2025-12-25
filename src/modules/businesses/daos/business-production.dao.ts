@@ -7,6 +7,7 @@ export interface BusinessProductionRecord {
   business_id: string;
   accumulated_time: number;
   last_updated: Date;
+  last_claimed_at?: Date;
   created_at: Date;
   updated_at: Date;
 }
@@ -120,6 +121,42 @@ export class BusinessProductionDao extends KyselyDao<BusinessProductionDao> {
     } catch (error) {
       console.error("Error resetting production:", error);
       return false;
+    }
+  }
+
+  /**
+   * Update last claimed timestamp
+   */
+  async updateLastClaimedAt(businessId: string): Promise<boolean> {
+    try {
+      // Ensure record exists
+      await this.getOrCreateProduction(businessId);
+
+      const updateQuery = this.kysely
+        .updateTable("business_production" as any)
+        .set({
+          last_claimed_at: sql`now()`,
+          updated_at: sql`now()`,
+        } as any) as any;
+      const result = await updateQuery.where("business_id", "=", businessId).executeTakeFirst();
+
+      return result.numUpdatedRows > 0;
+    } catch (error) {
+      console.error("Error updating last claimed at:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Get last claimed timestamp
+   */
+  async getLastClaimedAt(businessId: string): Promise<Date | null> {
+    try {
+      const record = await this.getOrCreateProduction(businessId);
+      return record?.last_claimed_at || null;
+    } catch (error) {
+      console.error("Error getting last claimed at:", error);
+      return null;
     }
   }
 }

@@ -54,7 +54,6 @@ describe("Business", () => {
 
     it("should return inputs and outputs if provided", () => {
       const input: BusinessInputDto = {
-        id: uuidv4(),
         businessId: businessData.id,
         assetId: uuidv4(),
         name: "Water",
@@ -62,7 +61,6 @@ describe("Business", () => {
       };
 
       const output: BusinessOutputDto = {
-        id: uuidv4(),
         businessId: businessData.id,
         assetId: uuidv4(),
         name: "Wheat",
@@ -83,7 +81,6 @@ describe("Business", () => {
   describe("calculateAvailableOutputs", () => {
     it("should calculate available outputs based on accumulated time", () => {
       const output: BusinessOutputDto = {
-        id: uuidv4(),
         businessId: businessData.id,
         assetId: uuidv4(),
         name: "Wheat",
@@ -191,7 +188,6 @@ describe("Business", () => {
       };
 
       const input: BusinessInputDto = {
-        id: uuidv4(),
         businessId: businessData.id,
         assetId: uuidv4(),
         name: "Water",
@@ -244,7 +240,6 @@ describe("Business", () => {
 
     it("should include inputs and outputs in status", async () => {
       const input: BusinessInputDto = {
-        id: uuidv4(),
         businessId: businessData.id,
         assetId: uuidv4(),
         name: "Water",
@@ -252,7 +247,6 @@ describe("Business", () => {
       };
 
       const output: BusinessOutputDto = {
-        id: uuidv4(),
         businessId: businessData.id,
         assetId: uuidv4(),
         name: "Wheat",

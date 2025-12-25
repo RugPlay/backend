@@ -5,11 +5,10 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { BusinessDao } from "../daos/business.dao";
-import { BusinessInputDao } from "../daos/business-input.dao";
-import { BusinessOutputDao } from "../daos/business-output.dao";
-import { BusinessProductionDao } from "../daos/business-production.dao";
+import { ProductionDao, Production } from "../daos/production.dao";
 import { CorporationDao } from "@/modules/corporations/daos/corporation.dao";
 import { AssetHoldingDao } from "@/modules/assets/daos/asset-holding.dao";
+import { AssetService } from "@/modules/assets/services/asset.service";
 import { BusinessFactory } from "../factories/business-factory";
 import { Business } from "../classes/business.class";
 import { CreateBusinessDto } from "../dtos/create-business.dto";
@@ -17,10 +16,13 @@ import { UpdateBusinessDto } from "../dtos/update-business.dto";
 import { BusinessFiltersDto } from "../dtos/business-filters.dto";
 import { BusinessDto } from "../dtos/business.dto";
 import { BusinessType } from "../types/business-type";
-import { AddProductionTimeDto } from "../dtos/add-production-time.dto";
+import { AddProductionInputsDto } from "../dtos/add-production-inputs.dto";
 import { ClaimOutputDto } from "../dtos/claim-output.dto";
 import { ClaimOutputResultDto } from "../dtos/claim-output-result.dto";
 import { BusinessProductionProgressDto } from "../dtos/business-production-progress.dto";
+import { ProductionBatchDto } from "../dtos/production-batch.dto";
+import { getBusinessTypeConfig } from "../config/business-type-config";
+import { BusinessInputDto } from "../dtos/business-input.dto";
 
 @Injectable()
 export class BusinessService {
@@ -28,11 +30,10 @@ export class BusinessService {
 
   constructor(
     private readonly businessDao: BusinessDao,
-    private readonly businessInputDao: BusinessInputDao,
-    private readonly businessOutputDao: BusinessOutputDao,
-    private readonly businessProductionDao: BusinessProductionDao,
+    private readonly productionDao: ProductionDao,
     private readonly corporationDao: CorporationDao,
     private readonly assetHoldingDao: AssetHoldingDao,
+    private readonly assetService: AssetService,
     private readonly businessFactory: BusinessFactory
   ) {}
 
@@ -74,20 +75,9 @@ export class BusinessService {
       throw new BadRequestException("Failed to create business");
     }
 
-    // Create inputs if provided
-    if (createDto.inputs && createDto.inputs.length > 0) {
-      for (const input of createDto.inputs) {
-        await this.businessInputDao.createInput(businessId, input);
-      }
-    }
-
-    // Create outputs if provided
-    if (createDto.outputs && createDto.outputs.length > 0) {
-      for (const output of createDto.outputs) {
-        await this.businessOutputDao.createOutput(businessId, output);
-      }
-    }
-
+    // Inputs and outputs are now derived from recipes in BusinessDao
+    // No need to create them in the database
+    
     const business = await this.businessDao.getBusinessById(businessId);
     if (!business) {
       throw new NotFoundException("Business not found after creation");
@@ -233,15 +223,19 @@ export class BusinessService {
     return this.businessFactory.getSupportedTypes();
   }
 
+
+
+
   /**
-   * Add production time to a business
+   * Add production inputs to start a new production batch
+   * Calculates cycles from inputs and starts real-time production
    */
-  async addProductionTime(
+  async addProductionInputs(
     businessId: string,
-    addTimeDto: AddProductionTimeDto
+    inputsDto: AddProductionInputsDto
   ): Promise<BusinessProductionProgressDto> {
     this.logger.log(
-      `Adding ${addTimeDto.timeSeconds}s production time to business ${businessId}`
+      `Adding production inputs to business ${businessId}`
     );
 
     const business = await this.businessDao.getBusinessById(businessId);
@@ -249,19 +243,93 @@ export class BusinessService {
       throw new NotFoundException(`Business with ID ${businessId} not found`);
     }
 
-    const success = await this.businessProductionDao.addTime(
-      businessId,
-      addTimeDto.timeSeconds
+    const businessInstance = this.businessFactory.createBusiness(business);
+    const inputs = business.inputs || [];
+
+    if (inputs.length === 0) {
+      throw new BadRequestException("Business has no input requirements defined");
+    }
+
+    // Validate all required inputs are provided
+    const providedInputMap = new Map(
+      inputsDto.inputs.map((input) => [input.assetId, input.quantity])
     );
-    if (!success) {
-      throw new BadRequestException("Failed to add production time");
+
+    for (const requiredInput of inputs) {
+      if (!providedInputMap.has(requiredInput.assetId)) {
+        throw new BadRequestException(
+          `Missing required input: ${requiredInput.name || requiredInput.assetId}`
+        );
+      }
+    }
+
+    // Calculate max cycles from scarcest input
+    let maxCycles = Infinity;
+    const inputQuantities: Record<string, number> = {};
+
+    for (const requiredInput of inputs) {
+      const providedQuantity = providedInputMap.get(requiredInput.assetId)!;
+      const cyclesFromInput = Math.floor(providedQuantity / requiredInput.quantity);
+      maxCycles = Math.min(maxCycles, cyclesFromInput);
+      inputQuantities[requiredInput.assetId] = providedQuantity;
+    }
+
+    if (maxCycles <= 0 || maxCycles === Infinity) {
+      throw new BadRequestException(
+        "Insufficient inputs to create at least 1 production cycle"
+      );
+    }
+
+    // Validate holdings have enough inputs
+    for (const inputItem of inputsDto.inputs) {
+      const holding = await this.assetHoldingDao.getAsset(
+        business.corporationId,
+        inputItem.assetId
+      );
+
+      if (!holding || holding.quantity < inputItem.quantity) {
+        throw new BadRequestException(
+          `Insufficient ${inputItem.assetId}: need ${inputItem.quantity}, have ${holding?.quantity || 0}`
+        );
+      }
+    }
+
+    // Consume inputs from holdings
+    for (const inputItem of inputsDto.inputs) {
+      const success = await this.assetHoldingDao.adjustAssetQuantity(
+        business.corporationId,
+        inputItem.assetId,
+        -inputItem.quantity
+      );
+      if (!success) {
+        throw new BadRequestException(
+          `Failed to consume input ${inputItem.assetId}`
+        );
+      }
+    }
+
+    // Calculate cycle completion time
+    const defaultTime = businessInstance.getDefaultProductionTime();
+    const baseRate = businessInstance.getBaseProductionRate();
+    const cycleCompletionTime = defaultTime / baseRate;
+
+    // Create production batch
+    const batchId = await this.productionDao.createBatch(
+      businessId,
+      maxCycles,
+      inputQuantities,
+      cycleCompletionTime
+    );
+
+    if (!batchId) {
+      throw new BadRequestException("Failed to create production batch");
     }
 
     return await this.getProductionProgress(businessId);
   }
 
   /**
-   * Get production progress for a business
+   * Get production progress for a business (batch-based)
    */
   async getProductionProgress(
     businessId: string
@@ -271,26 +339,107 @@ export class BusinessService {
       throw new NotFoundException(`Business with ID ${businessId} not found`);
     }
 
-    const accumulatedTime =
-      await this.businessProductionDao.getAccumulatedTime(businessId);
-    const specializedBusiness =
-      this.businessFactory.createBusiness(business);
+    const businessInstance = this.businessFactory.createBusiness(business);
+    const batches = await this.productionDao.getBatchesByBusinessId(businessId);
+    
+    // Calculate available cycles for each batch (real-time)
+    const now = Date.now();
+    let totalCyclesAvailable = 0;
+    let totalCyclesInProgress = 0;
 
-    const availableOutputs = specializedBusiness.calculateAvailableOutputs(
-      accumulatedTime
-    );
+    const batchDtos: ProductionBatchDto[] = batches.map((batch) => {
+      const elapsedSeconds = (now - batch.production_started_at.getTime()) / 1000;
+      const cyclesCompleted = Math.floor(elapsedSeconds / batch.cycle_completion_time);
+      const cyclesAvailable = Math.min(cyclesCompleted, batch.cycles_remaining);
+      
+      // Update status if needed
+      if (cyclesAvailable >= batch.cycles_remaining && batch.status === "active") {
+        // Mark as completed (async, don't wait)
+        this.productionDao.markBatchCompleted(batch.id).catch(
+          (err) => this.logger.error(`Failed to mark batch ${batch.id} as completed`, err)
+        );
+      }
+
+      totalCyclesAvailable += cyclesAvailable;
+      totalCyclesInProgress += batch.cycles_remaining - cyclesAvailable;
+
+      return {
+        id: batch.id,
+        cycles: batch.cycles,
+        cyclesRemaining: batch.cycles_remaining,
+        inputQuantities: batch.input_quantities,
+        productionStartedAt: batch.production_started_at,
+        cycleCompletionTime: batch.cycle_completion_time,
+        status: batch.status,
+        cyclesAvailable,
+        createdAt: batch.created_at,
+        updatedAt: batch.updated_at,
+      };
+    });
+
+    // Calculate available outputs based on total cycles
+    const availableOutputs = business.outputs?.map((output) => {
+      const productionTime = output.productionTime || businessInstance.getDefaultProductionTime();
+      const baseRate = businessInstance.getBaseProductionRate();
+      const effectiveTime = productionTime / baseRate;
+      const cyclesCompleted = Math.floor(totalCyclesAvailable);
+      const quantityAvailable = cyclesCompleted * output.quantity;
+
+      return {
+        output,
+        cyclesCompleted,
+        quantityAvailable,
+      };
+    }) || [];
+
+    const lastClaimedAt = await this.businessDao.getLastClaimedAt(businessId);
 
     return {
       businessId,
-      accumulatedTime,
+      totalCyclesAvailable,
+      totalCyclesInProgress,
+      batches: batchDtos,
       availableOutputs,
       lastUpdated: new Date(),
+      lastClaimedAt: lastClaimedAt || undefined,
     };
   }
 
   /**
-   * Claim business outputs
-   * Consumes inputs from corporation holdings and adds outputs to corporation holdings
+   * Get all production batches for a business (for frontend display)
+   */
+  async getBusinessProductionBatches(businessId: string): Promise<ProductionBatchDto[]> {
+    const business = await this.businessDao.getBusinessById(businessId);
+    if (!business) {
+      throw new NotFoundException(`Business with ID ${businessId} not found`);
+    }
+
+    const batches = await this.productionDao.getBatchesByBusinessId(businessId);
+    const now = Date.now();
+
+    return batches.map((batch) => {
+      const elapsedSeconds = (now - batch.production_started_at.getTime()) / 1000;
+      const cyclesCompleted = Math.floor(elapsedSeconds / batch.cycle_completion_time);
+      const cyclesAvailable = Math.min(cyclesCompleted, batch.cycles_remaining);
+
+      return {
+        id: batch.id,
+        cycles: batch.cycles,
+        cyclesRemaining: batch.cycles_remaining,
+        inputQuantities: batch.input_quantities,
+        productionStartedAt: batch.production_started_at,
+        cycleCompletionTime: batch.cycle_completion_time,
+        status: batch.status,
+        cyclesAvailable,
+        createdAt: batch.created_at,
+        updatedAt: batch.updated_at,
+      };
+    });
+  }
+
+  /**
+   * Claim business outputs (batch-based)
+   * Consumes cycles from production batches and adds outputs to corporation holdings
    * 
    * For Commerce businesses: Outputs are cash (USD asset) added to holdings
    * For Power businesses: Outputs are power capacity units (abstracted)
@@ -306,7 +455,7 @@ export class BusinessService {
     claimDto: ClaimOutputDto
   ): Promise<ClaimOutputResultDto> {
     this.logger.log(
-      `Claiming output ${claimDto.outputId} from business ${businessId}`
+      `Claiming output ${claimDto.assetId} from business ${businessId}`
     );
 
     const business = await this.businessDao.getBusinessById(businessId);
@@ -314,38 +463,40 @@ export class BusinessService {
       throw new NotFoundException(`Business with ID ${businessId} not found`);
     }
 
-    // Find the output
-    const output = business.outputs?.find((o) => o.id === claimDto.outputId);
+    // Find the output by assetId (outputs no longer have IDs, they come from recipes)
+    const output = business.outputs?.find((o) => o.assetId === claimDto.assetId);
     if (!output) {
       throw new NotFoundException(
-        `Output with ID ${claimDto.outputId} not found for this business`
+        `Output with asset ID ${claimDto.assetId} not found for this business`
       );
     }
 
-    const businessInstance =
-      this.businessFactory.createBusiness(business);
-    const accumulatedTime =
-      await this.businessProductionDao.getAccumulatedTime(businessId);
-
-    // Validate using strategy if available
-    await businessInstance.validateClaim(claimDto.outputId, 0); // Will be validated with actual cycles below
-
-    // Calculate how many cycles are available
-    // Use output-specific production time, or default for this business type
-    const defaultTime = businessInstance.getDefaultProductionTime();
-    const productionTime = output.productionTime || defaultTime;
+    const businessInstance = this.businessFactory.createBusiness(business);
     
-    // Apply business-type-specific production rate multiplier
-    // Higher rate = faster production = less time per cycle
-    const baseRate = businessInstance.getBaseProductionRate();
-    const effectiveTime = productionTime / baseRate;
+    // Get batches with available cycles
+    const batches = await this.productionDao.getBatchesWithAvailableCycles(businessId);
     
-    const maxCycles = Math.floor(accumulatedTime / effectiveTime);
-    const cyclesToClaim = claimDto.cycles || maxCycles;
+    // Calculate available cycles from all batches (real-time)
+    const now = Date.now();
+    let totalCyclesAvailable = 0;
+    const batchCycles: Array<{ batch: Production; cyclesAvailable: number }> = [];
 
-    if (cyclesToClaim > maxCycles) {
+    for (const batch of batches) {
+      const elapsedSeconds = (now - batch.production_started_at.getTime()) / 1000;
+      const cyclesCompleted = Math.floor(elapsedSeconds / batch.cycle_completion_time);
+      const cyclesAvailable = Math.min(cyclesCompleted, batch.cycles_remaining);
+      
+      if (cyclesAvailable > 0) {
+        totalCyclesAvailable += cyclesAvailable;
+        batchCycles.push({ batch, cyclesAvailable });
+      }
+    }
+
+    const cyclesToClaim = claimDto.cycles || totalCyclesAvailable;
+
+    if (cyclesToClaim > totalCyclesAvailable) {
       throw new BadRequestException(
-        `Cannot claim ${cyclesToClaim} cycles. Only ${maxCycles} cycles available.`
+        `Cannot claim ${cyclesToClaim} cycles. Only ${totalCyclesAvailable} cycles available.`
       );
     }
 
@@ -353,49 +504,32 @@ export class BusinessService {
       throw new BadRequestException("Must claim at least 1 cycle");
     }
 
-    // Validate inputs using strategy if available, then standard validation
+    // Validate using strategy if available
+    await businessInstance.validateClaim(claimDto.assetId, cyclesToClaim);
+
+    // Consume cycles from batches (FIFO - oldest first)
+    let cyclesRemainingToClaim = cyclesToClaim;
     const inputs = business.inputs || [];
-    if (inputs.length > 0) {
-      await businessInstance.validateInputs(inputs, cyclesToClaim);
+
+    for (const { batch, cyclesAvailable } of batchCycles) {
+      if (cyclesRemainingToClaim <= 0) break;
+
+      const cyclesToConsumeFromBatch = Math.min(cyclesAvailable, cyclesRemainingToClaim);
       
-      // Standard input validation
+      // Consume inputs from this batch
       for (const input of inputs) {
-        const requiredQuantity = input.quantity * cyclesToClaim;
-        const holding = await this.assetHoldingDao.getAsset(
-          business.corporationId,
-          input.assetId
-        );
-
-        if (!holding || holding.quantity < requiredQuantity) {
-          throw new BadRequestException(
-            `Insufficient ${input.name || input.assetId}: need ${requiredQuantity}, have ${holding?.quantity || 0}`
-          );
-        }
+        const requiredQuantity = input.quantity * cyclesToConsumeFromBatch;
+        // Inputs were already consumed when batch was created, so we just update the batch
       }
-    }
-    
-    // Final validation with actual cycles
-    await businessInstance.validateClaim(claimDto.outputId, cyclesToClaim);
 
-    // Consume inputs
-    for (const input of inputs) {
-      const requiredQuantity = input.quantity * cyclesToClaim;
-      const success = await this.assetHoldingDao.adjustAssetQuantity(
-        business.corporationId,
-        input.assetId,
-        -requiredQuantity
-      );
-      if (!success) {
-        throw new BadRequestException(
-          `Failed to consume input ${input.name || input.assetId}`
-        );
-      }
+      // Update batch cycles remaining
+      const newCyclesRemaining = batch.cycles_remaining - cyclesToConsumeFromBatch;
+      await this.productionDao.updateBatchCycles(batch.id, newCyclesRemaining);
+
+      cyclesRemainingToClaim -= cyclesToConsumeFromBatch;
     }
 
     // Add outputs to corporation holdings
-    // For Commerce: output.assetId should be the cash asset (e.g., USD)
-    // For Power/Logistics: output.assetId should be the capacity asset
-    // For others: output.assetId is the produced good
     const outputQuantity = cyclesToClaim * output.quantity;
     
     // TODO: Apply power multiplier if business type supports it
@@ -419,17 +553,17 @@ export class BusinessService {
       );
     }
 
-    // Consume the time (using effective time that accounts for production rate)
-    const timeToConsume = cyclesToClaim * effectiveTime;
-    await this.businessProductionDao.consumeTime(businessId, timeToConsume);
+    // Update last claimed timestamp
+    await this.businessDao.updateLastClaimedAt(businessId);
 
-    const quantity = cyclesToClaim * output.quantity;
+    // Calculate remaining cycles
+    const progress = await this.getProductionProgress(businessId);
 
     return {
       assetId: output.assetId,
-      quantity,
+      quantity: outputQuantity,
       cyclesClaimed: cyclesToClaim,
-      remainingTime: accumulatedTime - timeToConsume,
+      remainingTime: progress.totalCyclesAvailable,
     };
   }
 }

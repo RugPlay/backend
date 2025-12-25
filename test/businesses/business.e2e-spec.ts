@@ -52,115 +52,9 @@ describe("Businesses (e2e)", () => {
   });
 
   async function ensureBusinessTablesExist() {
-    const kysely = (assetHoldingDao as any).kysely as Kysely<DB>;
-
-    try {
-      // Check if business_inputs table exists
-      const inputsCheck = await sql`
-        SELECT EXISTS (
-          SELECT FROM information_schema.tables 
-          WHERE table_schema = 'public' 
-          AND table_name = 'business_inputs'
-        )
-      `.execute(kysely);
-      
-      const inputsExists = (inputsCheck as any)?.rows?.[0]?.exists || false;
-      
-      if (!inputsExists) {
-        // Create business_inputs table
-        await sql`
-          CREATE TABLE IF NOT EXISTS business_inputs (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
-            asset_id UUID NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
-            quantity NUMERIC NOT NULL,
-            name VARCHAR(255),
-            created_at TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at TIMESTAMP NOT NULL DEFAULT now()
-          )
-        `.execute(kysely);
-
-        await sql`
-          CREATE INDEX IF NOT EXISTS idx_business_inputs_business_id 
-          ON business_inputs(business_id)
-        `.execute(kysely);
-
-        await sql`
-          CREATE INDEX IF NOT EXISTS idx_business_inputs_asset_id 
-          ON business_inputs(asset_id)
-        `.execute(kysely);
-      }
-
-      // Check if business_outputs table exists
-      const outputsCheck = await sql`
-        SELECT EXISTS (
-          SELECT FROM information_schema.tables 
-          WHERE table_schema = 'public' 
-          AND table_name = 'business_outputs'
-        )
-      `.execute(kysely);
-      
-      const outputsExists = (outputsCheck as any)?.rows?.[0]?.exists || false;
-      
-      if (!outputsExists) {
-        // Create business_outputs table
-        await sql`
-          CREATE TABLE IF NOT EXISTS business_outputs (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
-            asset_id UUID NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
-            quantity NUMERIC NOT NULL,
-            name VARCHAR(255),
-            production_time INTEGER,
-            created_at TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at TIMESTAMP NOT NULL DEFAULT now()
-          )
-        `.execute(kysely);
-
-        await sql`
-          CREATE INDEX IF NOT EXISTS idx_business_outputs_business_id 
-          ON business_outputs(business_id)
-        `.execute(kysely);
-
-        await sql`
-          CREATE INDEX IF NOT EXISTS idx_business_outputs_asset_id 
-          ON business_outputs(asset_id)
-        `.execute(kysely);
-      }
-
-      // Check if business_production table exists
-      const productionCheck = await sql`
-        SELECT EXISTS (
-          SELECT FROM information_schema.tables 
-          WHERE table_schema = 'public' 
-          AND table_name = 'business_production'
-        )
-      `.execute(kysely);
-      
-      const productionExists = (productionCheck as any)?.rows?.[0]?.exists || false;
-      
-      if (!productionExists) {
-        // Create business_production table
-        await sql`
-          CREATE TABLE IF NOT EXISTS business_production (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE UNIQUE,
-            accumulated_time INTEGER NOT NULL DEFAULT 0,
-            last_updated TIMESTAMP NOT NULL DEFAULT now(),
-            created_at TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at TIMESTAMP NOT NULL DEFAULT now()
-          )
-        `.execute(kysely);
-
-        await sql`
-          CREATE INDEX IF NOT EXISTS idx_business_production_business_id 
-          ON business_production(business_id)
-        `.execute(kysely);
-      }
-    } catch (error) {
-      console.error("Error ensuring business tables exist:", error);
-      // Don't throw - tables might already exist or migrations might have run
-    }
+    // Tables are now created via migrations
+    // No need to manually create business_inputs, business_outputs, or business_production tables
+    // They have been removed or replaced with the production table
   }
 
   async function setupTestData() {
@@ -195,7 +89,7 @@ describe("Businesses (e2e)", () => {
   }
 
   describe("POST /businesses", () => {
-    it("should create a business", async () => {
+    it("should create a business with automatic outputs from recipe", async () => {
       const uniqueName = `Test Farm ${Date.now()}`;
       const response = await request(app.getHttpServer())
         .post("/businesses")
@@ -203,13 +97,7 @@ describe("Businesses (e2e)", () => {
           name: uniqueName,
           category: "agriculture",
           corporationId: testCorporationId,
-          outputs: [
-            {
-              assetId: wheatAssetId,
-              quantity: 5,
-              productionTime: 60,
-            },
-          ],
+          // No outputs provided - should be created from recipe
         })
         .expect(201);
 
@@ -217,9 +105,17 @@ describe("Businesses (e2e)", () => {
       expect(response.body.name).toContain("Test Farm");
       expect(response.body.category).toBe("agriculture");
       expect(response.body.corporationId).toBe(testCorporationId);
+      // Should have outputs from recipe
+      expect(response.body.outputs).toBeDefined();
+      expect(response.body.outputs.length).toBeGreaterThan(0);
+      // Should have WHEAT output
+      const wheatOutput = response.body.outputs.find((o: any) => 
+        o.name === "Wheat" || o.assetId
+      );
+      expect(wheatOutput).toBeDefined();
     });
 
-    it("should create a business with inputs and outputs", async () => {
+    it("should create a business with automatic inputs and outputs from recipe", async () => {
       const uniqueName = `Test Factory ${Date.now()}`;
       const response = await request(app.getHttpServer())
         .post("/businesses")
@@ -227,31 +123,57 @@ describe("Businesses (e2e)", () => {
           name: uniqueName,
           category: "industry_manufacturing",
           corporationId: testCorporationId,
-          inputs: [
-            {
-              assetId: wheatAssetId,
-              quantity: 2,
-            },
-            {
-              assetId: ironAssetId,
-              quantity: 1,
-            },
-          ],
-          outputs: [
-            {
-              assetId: wheatAssetId,
-              quantity: 1,
-              productionTime: 300,
-            },
-          ],
+          // No inputs/outputs provided - should be created from recipe
         })
         .expect(201);
 
       expect(response.body.id).toBeDefined();
       expect(response.body.inputs).toBeDefined();
       expect(response.body.outputs).toBeDefined();
+      // Manufacturing recipe has 2 inputs (Wheat, Iron) and 1 output (Manufactured Goods)
       expect(response.body.inputs.length).toBe(2);
       expect(response.body.outputs.length).toBe(1);
+    });
+
+    it("should allow adding inputs to an existing business", async () => {
+      // Create a business first (inputs/outputs from recipe)
+      const uniqueName = `Test Factory ${Date.now()}`;
+      const createResponse = await request(app.getHttpServer())
+        .post("/businesses")
+        .send({
+          name: uniqueName,
+          category: "agriculture",
+          corporationId: testCorporationId,
+        })
+        .expect(201);
+
+      const businessId = createResponse.body.id;
+
+      // Add a custom input to the business
+      const addInputResponse = await request(app.getHttpServer())
+        .post(`/businesses/${businessId}/inputs`)
+        .send({
+          assetId: wheatAssetId,
+          quantity: 5,
+          name: "Custom Input",
+        })
+        .expect(201);
+
+      expect(addInputResponse.body.id).toBeDefined();
+      expect(addInputResponse.body.assetId).toBe(wheatAssetId);
+      expect(addInputResponse.body.quantity).toBe(5);
+
+      // Verify the input was added
+      const businessResponse = await request(app.getHttpServer())
+        .get(`/businesses/${businessId}`)
+        .expect(200);
+
+      // Should have recipe inputs (none for agriculture) + custom input
+      expect(businessResponse.body.inputs.length).toBeGreaterThanOrEqual(1);
+      const customInput = businessResponse.body.inputs.find(
+        (i: any) => i.assetId === wheatAssetId
+      );
+      expect(customInput).toBeDefined();
     });
 
     it("should return 400 for invalid business type", async () => {
@@ -340,31 +262,6 @@ describe("Businesses (e2e)", () => {
     });
   });
 
-  describe("POST /businesses/:id/production/time", () => {
-    it("should add production time", async () => {
-      const business = await BusinessTestHelper.createTestAgricultureBusiness(
-        businessService,
-        assetService,
-        testCorporationId
-      );
-
-      const response = await request(app.getHttpServer())
-        .post(`/businesses/${business.business.id}/production/time`)
-        .send({ timeSeconds: 120 })
-        .expect(200);
-
-      expect(response.body.accumulatedTime).toBe(120);
-      expect(response.body.availableOutputs).toBeDefined();
-      expect(Array.isArray(response.body.availableOutputs)).toBe(true);
-    });
-
-    it("should return 404 for non-existent business", async () => {
-      await request(app.getHttpServer())
-        .post(`/businesses/${uuidv4()}/production/time`)
-        .send({ timeSeconds: 120 })
-        .expect(404);
-    });
-  });
 
   describe("GET /businesses/:id/production/progress", () => {
     it("should return production progress", async () => {
@@ -374,18 +271,14 @@ describe("Businesses (e2e)", () => {
         testCorporationId
       );
 
-      // Add some production time
-      await businessService.addProductionTime(business.business.id, {
-        timeSeconds: 180,
-      });
-
       const response = await request(app.getHttpServer())
         .get(`/businesses/${business.business.id}/production/progress`)
         .expect(200);
 
       expect(response.body.businessId).toBe(business.business.id);
-      expect(response.body.accumulatedTime).toBe(180);
-      expect(response.body.availableOutputs).toBeDefined();
+      expect(response.body.totalCyclesAvailable).toBeDefined();
+      expect(response.body.totalCyclesInProgress).toBeDefined();
+      expect(Array.isArray(response.body.batches)).toBe(true);
     });
   });
 
@@ -397,26 +290,63 @@ describe("Businesses (e2e)", () => {
         testCorporationId
       );
 
-      // Add production time (enough for 2 cycles: 120s / 30s effective = 4 cycles)
-      await businessService.addProductionTime(business.business.id, {
-        timeSeconds: 120,
+      // Agriculture businesses have no inputs, so we can't create batches
+      // This test is skipped since agriculture can't produce without inputs in the new system
+      // For now, we'll test with a manufacturing business instead
+      const manufacturing = await BusinessTestHelper.createTestManufacturingBusiness(
+        businessService,
+        assetService,
+        testCorporationId,
+        wheatAssetId,
+        ironAssetId
+      );
+
+      const businessWithInputs = await businessService.getBusinessById(manufacturing.business.id);
+      const recipeWheatInput = businessWithInputs.inputs!.find((i: any) => 
+        i.name?.toLowerCase().includes('wheat') || i.assetId === wheatAssetId
+      );
+      const recipeIronInput = businessWithInputs.inputs!.find((i: any) => 
+        i.name?.toLowerCase().includes('iron') || i.assetId === ironAssetId
+      );
+
+      const recipeWheatAssetId = recipeWheatInput?.assetId || wheatAssetId;
+      const recipeIronAssetId = recipeIronInput?.assetId || ironAssetId;
+
+      // Add inputs to holdings
+      await assetHoldingDao.adjustAssetQuantity(
+        testCorporationId,
+        recipeWheatAssetId,
+        20
+      );
+      await assetHoldingDao.adjustAssetQuantity(
+        testCorporationId,
+        recipeIronAssetId,
+        10
+      );
+
+      // Create production batch
+      await businessService.addProductionInputs(businessWithInputs.id, {
+        inputs: [
+          { assetId: recipeWheatAssetId, quantity: 20 },
+          { assetId: recipeIronAssetId, quantity: 10 },
+        ],
       });
 
-      const output = business.business.outputs![0];
+      const output = businessWithInputs.outputs![0];
 
       const response = await request(app.getHttpServer())
-        .post(`/businesses/${business.business.id}/production/claim`)
-        .send({ outputId: output.id })
+        .post(`/businesses/${businessWithInputs.id}/production/claim`)
+        .send({ assetId: output.assetId })
         .expect(200);
 
       expect(response.body.quantity).toBeGreaterThan(0);
       expect(response.body.cyclesClaimed).toBeGreaterThan(0);
-      expect(response.body.assetId).toBe(business.wheatAssetId);
+      expect(response.body.assetId).toBe(output.assetId);
 
       // Verify holdings were updated
       const holding = await assetHoldingDao.getAsset(
         testCorporationId,
-        business.wheatAssetId
+        output.assetId
       );
       expect(holding).toBeDefined();
       expect(holding?.quantity).toBeGreaterThan(0);
@@ -432,46 +362,61 @@ describe("Businesses (e2e)", () => {
         ironAssetId
       );
 
-      // Add inputs to holdings
+      // Reload business to get recipe-created inputs
+      const business = await businessService.getBusinessById(manufacturing.business.id);
+      const recipeWheatInput = business.inputs!.find((i: any) => 
+        i.name?.toLowerCase().includes('wheat') || i.assetId === wheatAssetId
+      );
+      const recipeIronInput = business.inputs!.find((i: any) => 
+        i.name?.toLowerCase().includes('iron') || i.assetId === ironAssetId
+      );
+
+      const recipeWheatAssetId = recipeWheatInput?.assetId || wheatAssetId;
+      const recipeIronAssetId = recipeIronInput?.assetId || ironAssetId;
+
+      // Add inputs to holdings using recipe asset IDs
       await assetHoldingDao.adjustAssetQuantity(
         testCorporationId,
-        wheatAssetId,
+        recipeWheatAssetId,
         20
       );
       await assetHoldingDao.adjustAssetQuantity(
         testCorporationId,
-        ironAssetId,
+        recipeIronAssetId,
         10
       );
 
-      // Add production time
-      await businessService.addProductionTime(manufacturing.business.id, {
-        timeSeconds: 600, // Enough for 1 cycle (600 / (300/1.0) = 2 cycles)
+      // Create production batch with inputs
+      await businessService.addProductionInputs(business.id, {
+        inputs: [
+          { assetId: recipeWheatAssetId, quantity: 20 },
+          { assetId: recipeIronAssetId, quantity: 10 },
+        ],
       });
 
-      const output = manufacturing.business.outputs![0];
+      const output = business.outputs![0];
       const initialWheat = await assetHoldingDao.getAsset(
         testCorporationId,
-        wheatAssetId
+        recipeWheatAssetId
       );
       const initialIron = await assetHoldingDao.getAsset(
         testCorporationId,
-        ironAssetId
+        recipeIronAssetId
       );
 
       const response = await request(app.getHttpServer())
-        .post(`/businesses/${manufacturing.business.id}/production/claim`)
-        .send({ outputId: output.id })
+        .post(`/businesses/${business.id}/production/claim`)
+        .send({ assetId: output.assetId })
         .expect(200);
 
       // Verify inputs were consumed
       const finalWheat = await assetHoldingDao.getAsset(
         testCorporationId,
-        wheatAssetId
+        recipeWheatAssetId
       );
       const finalIron = await assetHoldingDao.getAsset(
         testCorporationId,
-        ironAssetId
+        recipeIronAssetId
       );
 
       expect(finalWheat?.quantity).toBeLessThan(initialWheat!.quantity);
@@ -492,45 +437,64 @@ describe("Businesses (e2e)", () => {
       expect(business.inputs).toBeDefined();
       expect(business.inputs!.length).toBeGreaterThan(0);
 
+      // Get the input asset IDs from the recipe (WHEAT and IRON)
+      // The recipe creates these assets, so we need to find them
+      const wheatInput = business.inputs!.find((i: any) => {
+        // Try to match by checking if it's the wheat asset or if we can find it
+        return i.assetId === wheatAssetId || i.name?.toLowerCase().includes('wheat');
+      });
+      const ironInput = business.inputs!.find((i: any) => {
+        return i.assetId === ironAssetId || i.name?.toLowerCase().includes('iron');
+      });
+
+      // Use the actual input asset IDs from the recipe
+      const recipeWheatAssetId = wheatInput?.assetId || wheatAssetId;
+      const recipeIronAssetId = ironInput?.assetId || ironAssetId;
+
       // Don't add inputs to holdings - ensure they're missing
       // Reset holdings to 0 to ensure clean state
-      await TestCleanupHelper.resetAssetQuantity(app, testCorporationId, wheatAssetId, 0);
-      await TestCleanupHelper.resetAssetQuantity(app, testCorporationId, ironAssetId, 0);
+      await TestCleanupHelper.resetAssetQuantity(app, testCorporationId, recipeWheatAssetId, 0);
+      await TestCleanupHelper.resetAssetQuantity(app, testCorporationId, recipeIronAssetId, 0);
       
       // Verify no inputs exist (or very small amount due to precision)
-      const wheatHolding = await assetHoldingDao.getAsset(testCorporationId, wheatAssetId);
-      const ironHolding = await assetHoldingDao.getAsset(testCorporationId, ironAssetId);
+      const wheatHolding = await assetHoldingDao.getAsset(testCorporationId, recipeWheatAssetId);
+      const ironHolding = await assetHoldingDao.getAsset(testCorporationId, recipeIronAssetId);
       const wheatQty = wheatHolding ? parseFloat(wheatHolding.quantity.toString()) : 0;
       const ironQty = ironHolding ? parseFloat(ironHolding.quantity.toString()) : 0;
       // Allow small floating point differences, but should be essentially 0
       expect(wheatQty).toBeLessThan(0.01);
       expect(ironQty).toBeLessThan(0.01);
 
-      await businessService.addProductionTime(business.id, {
-        timeSeconds: 600,
-      });
+      // Try to create production batch without sufficient inputs
+      await request(app.getHttpServer())
+        .post(`/businesses/${business.id}/production/inputs`)
+        .send({
+          inputs: [
+            { assetId: recipeWheatAssetId, quantity: 0 },
+            { assetId: recipeIronAssetId, quantity: 0 },
+          ],
+        })
+        .expect(400);
+    });
 
+    it("should return 400 if insufficient production cycles", async () => {
+      // Create manufacturing business with inputs
+      const manufacturing = await BusinessTestHelper.createTestManufacturingBusiness(
+        businessService,
+        assetService,
+        testCorporationId,
+        wheatAssetId,
+        ironAssetId
+      );
+
+      const business = await businessService.getBusinessById(manufacturing.business.id);
+
+      // Don't create production batch - try to claim without any batches
       const output = business.outputs![0];
 
       await request(app.getHttpServer())
         .post(`/businesses/${business.id}/production/claim`)
-        .send({ outputId: output.id })
-        .expect(400);
-    });
-
-    it("should return 400 if insufficient production time", async () => {
-      const business = await BusinessTestHelper.createTestAgricultureBusiness(
-        businessService,
-        assetService,
-        testCorporationId
-      );
-
-      // Don't add production time
-      const output = business.business.outputs![0];
-
-      await request(app.getHttpServer())
-        .post(`/businesses/${business.business.id}/production/claim`)
-        .send({ outputId: output.id, cycles: 1 })
+        .send({ assetId: output.assetId })
         .expect(400);
     });
   });

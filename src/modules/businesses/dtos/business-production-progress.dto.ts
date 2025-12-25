@@ -1,5 +1,6 @@
 import { ApiProperty } from "@nestjs/swagger";
 import { BusinessOutputDto } from "./business-output.dto";
+import { ProductionBatchDto } from "./production-batch.dto";
 
 /**
  * DTO representing production progress for a business
@@ -12,10 +13,22 @@ export class BusinessProductionProgressDto {
   businessId: string;
 
   @ApiProperty({
-    description: "Accumulated production time in seconds",
-    example: 7200,
+    description: "Total cycles available to claim across all batches",
+    example: 5,
   })
-  accumulatedTime: number;
+  totalCyclesAvailable: number;
+
+  @ApiProperty({
+    description: "Total cycles still in progress",
+    example: 3,
+  })
+  totalCyclesInProgress: number;
+
+  @ApiProperty({
+    description: "Production batches",
+    type: [ProductionBatchDto],
+  })
+  batches: ProductionBatchDto[];
 
   @ApiProperty({
     description: "Available outputs that can be claimed",
@@ -32,5 +45,12 @@ export class BusinessProductionProgressDto {
     example: "2024-03-20T12:00:00Z",
   })
   lastUpdated: Date;
+
+  @ApiProperty({
+    description: "Last time outputs were claimed",
+    example: "2024-03-20T12:00:00Z",
+    required: false,
+  })
+  lastClaimedAt?: Date;
 }
 
