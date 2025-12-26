@@ -6,12 +6,15 @@ import { ConfigModule, ConfigService, registerAs } from "@nestjs/config";
 import appConfig from "@/config/app.config";
 import sqlConfig from "@/config/sql.config";
 import redisConfig from "@/config/redis.config";
+import influenceConfig from "@/config/influence.config";
 import { SocketModule } from "@/modules/socket/socket.module";
 import { ExchangeModule } from "@/modules/exchange/exchange.module";
 import { AssetsModule } from "@/modules/assets/assets.module";
 import { AnalyticsModule } from "@/modules/analytics/analytics.module";
 import { BusinessesModule } from "@/modules/businesses/businesses.module";
 import { CorporationsModule } from "@/modules/corporations/corporations.module";
+import { InfluenceModule } from "@/modules/influence/influence.module";
+import { LeaderboardModule } from "@/modules/leaderboard/leaderboard.module";
 import { AllExceptionFilter } from "@/filters/all-exception.filter";
 import cookieConfig from "@/config/cookie.config";
 import { CacheModule } from "@nestjs/cache-manager";
@@ -40,6 +43,7 @@ import { PostgresDialect } from "kysely";
         registerAs('sql', () => sqlConfig), 
         registerAs('redis', () => redisConfig),
         registerAs('auth', () => authConfig),
+        registerAs('influence', () => influenceConfig),
       ],
     }),
     EventEmitterModule.forRoot(),
@@ -82,6 +86,8 @@ import { PostgresDialect } from "kysely";
     AnalyticsModule,
     CorporationsModule,
     BusinessesModule,
+    InfluenceModule,
+    LeaderboardModule,
   ],
   providers: [
     {

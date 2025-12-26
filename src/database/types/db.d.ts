@@ -332,6 +332,8 @@ export interface Corporations {
   description: string | null;
   id: Generated<string>;
   industry: string;
+  influence_base: Generated<Numeric>;
+  influence_last_updated_at: Timestamp | null;
   is_active: Generated<boolean>;
   name: string;
   updated_at: Generated<Timestamp>;

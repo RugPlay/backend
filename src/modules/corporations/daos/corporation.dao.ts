@@ -4,6 +4,7 @@ import { CreateCorporationDto } from "../dtos/create-corporation.dto";
 import { UpdateCorporationDto } from "../dtos/update-corporation.dto";
 import { CorporationFiltersDto } from "../dtos/corporation-filters.dto";
 import { CorporationDto } from "../dtos/corporation.dto";
+import { sql } from "kysely";
 
 @Injectable()
 export class CorporationDao extends KyselyDao<CorporationDao> {
@@ -163,6 +164,31 @@ export class CorporationDao extends KyselyDao<CorporationDao> {
   }
 
   /**
+   * Update influence base balance and timestamp
+   */
+  async updateInfluenceBase(
+    corporationId: string,
+    newBase: number,
+  ): Promise<boolean> {
+    try {
+      const result = await this.kysely
+        .updateTable("corporations" as any)
+        .set({
+          influence_base: newBase.toString(),
+          influence_last_updated_at: sql`now()`,
+          updated_at: sql`now()`,
+        } as any)
+        .where("id", "=", corporationId)
+        .executeTakeFirst();
+
+      return result.numUpdatedRows > 0;
+    } catch (error) {
+      console.error("Error updating influence base:", error);
+      return false;
+    }
+  }
+
+  /**
    * Map database record to CorporationDto
    */
   private mapRecordToDto(record: any): CorporationDto {
@@ -174,6 +200,8 @@ export class CorporationDao extends KyselyDao<CorporationDao> {
     dto.isActive = record.is_active;
     dto.createdAt = record.created_at;
     dto.updatedAt = record.updated_at;
+    dto.influenceBase = record.influence_base ? parseFloat(record.influence_base.toString()) : 0;
+    dto.influenceLastUpdatedAt = record.influence_last_updated_at || null;
     return dto;
   }
 }
