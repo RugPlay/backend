@@ -77,7 +77,7 @@ export class BusinessService {
 
     // Inputs and outputs are now derived from recipes in BusinessDao
     // No need to create them in the database
-    
+
     const business = await this.businessDao.getBusinessById(businessId);
     if (!business) {
       throw new NotFoundException("Business not found after creation");
@@ -565,6 +565,20 @@ export class BusinessService {
       cyclesClaimed: cyclesToClaim,
       remainingTime: progress.totalCyclesAvailable,
     };
+  }
+
+  /**
+   * TODO: Implement business upgrade functionality
+   * This should:
+   * 1. Accept businessId and upgradeType
+   * 2. Get upgrade cost from business type config
+   * 3. Use InfluenceService.spendInfluence() to deduct influence (which syncs holdings automatically)
+   * 4. Apply upgrade to business (update config, multipliers, etc.)
+   * 5. Return updated business DTO
+   */
+  async upgradeBusiness(businessId: string, upgradeType: string): Promise<BusinessDto> {
+    // TODO: Implement business upgrade functionality
+    throw new BadRequestException('Business upgrades not yet implemented');
   }
 }
 

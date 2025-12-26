@@ -11,22 +11,22 @@ export async function up(db: Kysely<any>): Promise<void> {
       col.notNull().references("businesses.id").onDelete("cascade")
     )
     .addColumn("cycles", "integer", (col) =>
-      col.notNull().comment("Total cycles in this batch")
+      col.notNull()
     )
     .addColumn("cycles_remaining", "integer", (col) =>
-      col.notNull().comment("Cycles not yet claimed")
+      col.notNull()
     )
     .addColumn("input_quantities", "jsonb", (col) =>
-      col.notNull().comment("Input quantities: { assetId: quantity }")
+      col.notNull()
     )
     .addColumn("production_started_at", "timestamp", (col) =>
-      col.notNull().defaultTo(sql`now()`).comment("When production started")
+      col.notNull().defaultTo(sql`now()`)
     )
     .addColumn("cycle_completion_time", "integer", (col) =>
-      col.notNull().comment("Seconds per cycle")
+      col.notNull()
     )
     .addColumn("status", "varchar(20)", (col) =>
-      col.notNull().defaultTo("active").comment("active, completed, or claimed")
+      col.notNull().defaultTo("active")
     )
     .addColumn("created_at", "timestamp", (col) =>
       col.notNull().defaultTo(sql`now()`)
@@ -52,9 +52,7 @@ export async function up(db: Kysely<any>): Promise<void> {
   // Add last_claimed_at to businesses table
   await db.schema
     .alterTable("businesses")
-    .addColumn("last_claimed_at", "timestamp", (col) =>
-      col.comment("Last time any production batch was claimed")
-    )
+    .addColumn("last_claimed_at", "timestamp")
     .execute();
 }
 
@@ -65,7 +63,5 @@ export async function down(db: Kysely<any>): Promise<void> {
   await db.schema
     .alterTable("businesses")
     .dropColumn("last_claimed_at")
-    .ifExists()
     .execute();
 }
-

@@ -43,19 +43,5 @@ export class CorporationDto {
     example: "2024-03-20T12:00:00Z",
   })
   updatedAt: Date;
-
-  @ApiProperty({
-    description: "Base influence amount at last update (for on-the-fly calculation)",
-    example: 100.5,
-    required: false,
-  })
-  influenceBase?: number;
-
-  @ApiProperty({
-    description: "When influence base was last updated",
-    example: "2024-03-20T12:00:00Z",
-    required: false,
-  })
-  influenceLastUpdatedAt?: Date | null;
 }
 

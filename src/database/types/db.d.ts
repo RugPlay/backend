@@ -323,6 +323,7 @@ export interface Businesses {
   description: string | null;
   id: Generated<string>;
   is_active: Generated<boolean>;
+  last_claimed_at: Timestamp | null;
   name: string;
   updated_at: Generated<Timestamp>;
 }
@@ -332,8 +333,6 @@ export interface Corporations {
   description: string | null;
   id: Generated<string>;
   industry: string;
-  influence_base: Generated<Numeric>;
-  influence_last_updated_at: Timestamp | null;
   is_active: Generated<boolean>;
   name: string;
   updated_at: Generated<Timestamp>;
@@ -348,6 +347,15 @@ export interface Holdings {
   quantity: Generated<Numeric>;
   total_cost: Generated<Numeric>;
   updated_at: Generated<Timestamp>;
+}
+
+export interface InfluenceEvents {
+  amount: Numeric;
+  balance_after: Numeric;
+  corporation_id: string;
+  created_at: Generated<Timestamp>;
+  event_type: string;
+  id: Generated<string>;
 }
 
 export interface Markets {
@@ -382,6 +390,19 @@ export interface Orders {
   quantity: Numeric;
   quote_asset_id: string;
   side: OrderSideEnum;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface Production {
+  business_id: string;
+  created_at: Generated<Timestamp>;
+  cycle_completion_time: number;
+  cycles: number;
+  cycles_remaining: number;
+  id: Generated<string>;
+  input_quantities: Json;
+  production_started_at: Generated<Timestamp>;
+  status: Generated<string>;
   updated_at: Generated<Timestamp>;
 }
 
@@ -584,8 +605,10 @@ export interface DB {
   businesses: Businesses;
   corporations: Corporations;
   holdings: Holdings;
+  influence_events: InfluenceEvents;
   markets: Markets;
   orders: Orders;
+  production: Production;
   "timescaledb_experimental.policies": TimescaledbExperimentalPolicies;
   "timescaledb_information.chunk_compression_settings": TimescaledbInformationChunkCompressionSettings;
   "timescaledb_information.chunks": TimescaledbInformationChunks;
